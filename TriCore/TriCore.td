@@ -1,4 +1,4 @@
-//===-- TriCore.td - Describe the TriCore Target Machine -------*- tablegen -*-===//
+//===-- TriCore.td - Describe the TriCore Target Machine ---*- tablegen -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,12 +18,18 @@
 include "llvm/Target/Target.td"
 
 //===----------------------------------------------------------------------===//
-// Descriptions
+// Register File Description
 //===----------------------------------------------------------------------===//
 
 include "TriCoreRegisterInfo.td"
-include "TriCoreInstrInfo.td"
+
 include "TriCoreCallingConv.td"
+
+//===----------------------------------------------------------------------===//
+// Instruction Descriptions
+//===----------------------------------------------------------------------===//
+
+include "TriCoreInstrInfo.td"
 
 def TriCoreInstrInfo : InstrInfo;
 

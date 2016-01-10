@@ -19,6 +19,7 @@
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
+
 class TargetMachine;
 class TriCoreTargetMachine;
 

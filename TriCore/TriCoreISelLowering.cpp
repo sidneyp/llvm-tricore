@@ -47,13 +47,16 @@ const char *TriCoreTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case TriCoreISD::RET_FLAG: return "TriCoreISD::RetFlag";
   case TriCoreISD::LOAD_SYM: return "TriCoreISD::LOAD_SYM";
   case TriCoreISD::MOVEi32:  return "TriCoreISD::MOVEi32";
-  case TriCoreISD::MOVEi64:  return "TriCoreISD::MOVEi64";
   case TriCoreISD::CALL:     return "TriCoreISD::CALL";
   case TriCoreISD::BR_CC:    return "TriCoreISD::BR_CC";
   case TriCoreISD::SELECT_CC:return "TriCoreISD::SELECT_CC";
+  case TriCoreISD::LOGICCMP: return "TriCoreISD::LOGICCMP";
   case TriCoreISD::CMP:      return "TriCoreISD::CMP";
+  case TriCoreISD::IMASK:    return "TriCoreISD::IMASK";
   case TriCoreISD::Wrapper:  return "TriCoreISD::Wrapper";
   case TriCoreISD::SH:       return "TriCoreISD::SH";
+  case TriCoreISD::SHA:      return "TriCoreISD::SHA";
+  case TriCoreISD::EXTR:     return "TriCoreISD::EXTR";
   }
 }
 
@@ -74,32 +77,66 @@ TriCoreTargetLowering::TriCoreTargetLowering(TriCoreTargetMachine &TriCoreTM)
 
 //  for (MVT VT : MVT::integer_valuetypes()) {
 //     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i8,  Expand);
-//     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i16,  Expand);
+//     setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16,  Promote);
+//  		 setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i32, Expand);
 //   }
 
   // Nodes that require custom lowering
   setOperationAction(ISD::GlobalAddress, MVT::i32,   Custom);
   setOperationAction(ISD::BR_CC,         MVT::i32,   Custom);
+  setOperationAction(ISD::BR_CC, 				 MVT::i64, 	 Custom);
   setOperationAction(ISD::SELECT_CC,     MVT::i32,   Custom);
   setOperationAction(ISD::SETCC,         MVT::i32,   Custom);
   setOperationAction(ISD::SHL,           MVT::i32,   Custom);
   setOperationAction(ISD::SRL,           MVT::i32,   Custom);
   setOperationAction(ISD::SRA,           MVT::i32,   Custom);
+  //setOperationAction(ISD::SRA,           MVT::i16,   Custom);
+  //setOperationAction(ISD::SIGN_EXTEND,   MVT::i16,   Expand);
 
+  //for (MVT VT : MVT::integer_valuetypes())
+  //setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16,   Custom);
 }
 
 SDValue TriCoreTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
 	switch (Op.getOpcode()) {
   default:								    llvm_unreachable("Unimplemented operand");
-  case ISD::GlobalAddress:    return LowerGlobalAddress(Op, DAG);
-  case ISD::BR_CC:            return LowerBR_CC(Op, DAG);
-  case ISD::SELECT_CC:        return LowerSELECT_CC(Op, DAG);
-  case ISD::SETCC:            return LowerSETCC(Op, DAG);
+  case ISD::GlobalAddress:    	return LowerGlobalAddress(Op, DAG);
+  case ISD::BR_CC:            	return LowerBR_CC(Op, DAG);
+  case ISD::SELECT_CC:        	return LowerSELECT_CC(Op, DAG);
+  case ISD::SETCC:            	return LowerSETCC(Op, DAG);
   case ISD::SHL:
   case ISD::SRL:
-  case ISD::SRA:              return LowerShifts(Op, DAG);
+  case ISD::SRA:              	return LowerShifts(Op, DAG);
+  //case ISD::SIGN_EXTEND:      	return LowerSIGN_EXTEND(Op, DAG);
+  //case ISD::SIGN_EXTEND_INREG:  return LowerSIGN_EXTEND_INREG(Op, DAG);
   }
 }
+
+SDValue TriCoreTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
+                                               SelectionDAG &DAG) const {
+
+	Op.dump();
+	return SDValue();
+}
+
+SDValue TriCoreTargetLowering::LowerSIGN_EXTEND(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  SDValue inVal = Op.getOperand(0);
+  EVT inValVT = inVal.getValueType();
+  EVT VT      = Op.getValueType();
+  SDLoc dl(Op);
+  inVal.dump();
+  outs() << "inValVT: " << inValVT.getEVTString() <<"\n";
+  outs() << "VT: " << VT.getEVTString() <<"\n";
+  //assert(VT == MVT::i16 && "Only support i16 for now!");
+  //SDValue zero = DAG.getConstant(0, dl, MVT::i32);
+
+  return SDValue();
+//  return DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, VT,
+//                       DAG.getNode(ISD::ANY_EXTEND, dl, VT, inVal),
+//                       DAG.getValueType(inVal.getValueType()));
+}
+
 
 bool TriCoreTargetLowering::isTruncateFree(Type *Ty1,
                                           Type *Ty2) const {
@@ -118,36 +155,41 @@ bool TriCoreTargetLowering::isTruncateFree(EVT VT1, EVT VT2) const {
 
 
 SDValue TriCoreTargetLowering::LowerShifts(SDValue Op,
-																									SelectionDAG &DAG) const {
+		SelectionDAG &DAG) const {
 	unsigned Opc = Op.getOpcode();
 	SDNode* N = Op.getNode();
 	SDValue shiftValue =  N->getOperand(1);
+
 	EVT VT = Op.getValueType();
 	SDLoc dl(N);
+	outs() << "Opc: " << Opc << "\n";
 	switch (Opc) {
 	default: llvm_unreachable("Invalid shift opcode!");
 	case ISD::SHL:
-				return DAG.getNode(TriCoreISD::SH, dl,
-						VT, N->getOperand(0), shiftValue);
+		return DAG.getNode(TriCoreISD::SH, dl, VT, N->getOperand(0), N->getOperand(1));
 	case ISD::SRL:
 	case ISD::SRA:
 		if(isa<ConstantSDNode>(shiftValue)) {
-			int64_t shiftVal = dyn_cast<ConstantSDNode>(shiftValue)->getSExtValue();
-			SDValue negShift = DAG.getTargetConstant(-shiftVal, dl, MVT::i32);
-			return DAG.getNode(TriCoreISD::SH, dl,
-					VT, N->getOperand(0), negShift);
+			outs() <<"shift constant\n";
+			int64_t shiftSVal = cast<ConstantSDNode>(shiftValue)->getSExtValue();
+			assert((shiftSVal>=-32 && shiftSVal<32) &&
+							"Shift can only be between -32 and +31");
+			ConstantSDNode *shiftSD = cast<ConstantSDNode>(N->getOperand(1));
+			uint64_t shiftVal = -shiftSD->getZExtValue();
+			SDValue negShift = DAG.getConstant(shiftVal, dl, MVT::i32);
+
+			unsigned Opcode = (Opc== ISD::SRL) ? TriCoreISD::SH : TriCoreISD::SHA;
+
+			return DAG.getNode(Opcode, dl, VT, N->getOperand(0), negShift);
 		}
 		else { // shift value is stored in a register
 
-			// get the number of operands
-			SDValue rSubNode;
-			SDNode *subResult = N->getOperand(1).getNode();
-			SDVTList VTs = DAG.getVTList(MVT::i32);
-			SDValue Ops[] = { SDValue(subResult, 0),
-												DAG.getTargetConstant(0, dl, MVT::i32) };
-
-			rSubNode = DAG.getNode(TriCoreISD::SUB, dl, VTs, Ops);
-			return DAG.getNode(TriCoreISD::SH, dl, VT, N->getOperand(0), rSubNode);
+			SDValue regOP = N->getOperand(1);
+			// Create subtraction node
+			SDValue zero = DAG.getConstant(0, dl, MVT::i32);
+			SDValue rsubNode = DAG.getNode(ISD::SUB, dl, MVT::i32, zero, regOP);
+			unsigned Opcode = (Opc== ISD::SRL) ? TriCoreISD::SH : TriCoreISD::SHA;
+			return DAG.getNode(Opcode, dl, MVT::i32, N->getOperand(0), rsubNode);
 		}
 	}
 }
@@ -157,9 +199,13 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
   // FIXME: Handle bittests someday
   assert(!LHS.getValueType().isFloatingPoint() && "We don't handle FP yet");
 
+  EVT VT = LHS.getValueType();
   // FIXME: Handle jump negative someday
   SDValue TargetCC;
   TriCoreCC::CondCodes TCC = TriCoreCC::COND_INVALID;
+
+  outs() << "CC: " << (int)CC << "\n";
+
   switch (CC) {
   default: llvm_unreachable("Invalid integer condition!");
   case ISD::SETEQ:
@@ -235,8 +281,73 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
     TCC = TriCoreCC::COND_LT;
     break;
   }
+
+  if (VT == MVT::i64) {
+
+  	SDValue LHSlo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, LHS,
+  	                               DAG.getIntPtrConstant(0, dl));
+  	SDValue LHShi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, LHS,
+  	  	                           DAG.getIntPtrConstant(1, dl));
+
+  	SDValue RHSlo, RHShi;
+  	if (RHS.getOpcode() != ISD::Constant) {
+  			RHSlo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, RHS,
+																					 DAG.getIntPtrConstant(0, dl));
+				RHShi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, RHS,
+																					 DAG.getIntPtrConstant(1, dl));
+  	}
+  	else
+  	{
+  		ConstantSDNode *C = cast<ConstantSDNode>(RHS);
+  		int64_t immVal = C->getSExtValue();
+  		int32_t lowerByte = immVal & 0xffffffff;
+  		int32_t HigherByte = (immVal >> 32);
+
+  		RHSlo = DAG.getConstant(lowerByte, dl, MVT::i32);
+  		RHShi = DAG.getConstant(HigherByte, dl, MVT::i32);
+  		RHShi.dump();
+  	}
+
+  	SDValue TargetEQ;
+  	if (TCC != TriCoreCC::COND_NE)
+  		TargetEQ = DAG.getConstant(TriCoreCC::COND_EQ, dl, MVT::i32);
+  	else
+  		TargetEQ = DAG.getConstant(TCC, dl, MVT::i32);
+
+		SDVTList VTs = DAG.getVTList(MVT::i32, MVT::Glue);
+		SDValue Ops[] = {LHShi, RHShi, TargetEQ};
+		SDValue compareHi = DAG.getNode(TriCoreISD::CMP, dl, VTs, Ops);
+
+		TargetCC = DAG.getConstant(TCC, dl, MVT::i32);
+		SDValue Ops2[] = {compareHi.getValue(0), LHSlo, RHSlo, TargetCC, compareHi.getValue(1)};
+		SDValue compareLo = DAG.getNode(TriCoreISD::LOGICCMP, dl, VTs, Ops2);
+
+		if ( (TCC == TriCoreCC::COND_NE ) || (TCC == TriCoreCC::COND_EQ))
+			return compareLo;
+
+		SDValue SecondCC = DAG.getConstant(TriCoreCC::COND_LT + 10, dl, MVT::i32);
+		if(RHS.getOpcode() == ISD::Constant) {
+			std::swap(LHShi, RHShi);
+			SecondCC = DAG.getConstant(TCC + 10, dl, MVT::i32);
+		}
+
+		SDValue Ops3[] = {compareLo.getValue(0), RHShi, LHShi, SecondCC, compareLo.getValue(1)};
+		SDValue compareCombine = DAG.getNode(TriCoreISD::LOGICCMP, dl, VTs, Ops3);
+
+		return compareCombine;
+  	//LHS2.dump();
+  }
+
+
   TargetCC = DAG.getConstant(TCC, dl, MVT::i32);
-  return DAG.getNode(TriCoreISD::CMP, dl, MVT::i32, LHS, RHS, TargetCC);
+  SDVTList VTs = DAG.getVTList(MVT::i32, MVT::Glue);
+  SDValue Ops[] = {LHS, RHS, TargetCC};
+
+//  return DAG.getNode(TriCoreISD::CMP, dl, MVT::i32, LHS, RHS, TargetCC);
+
+
+
+  return DAG.getNode(TriCoreISD::CMP, dl, VTs, Ops);
 }
 
 SDValue TriCoreTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
@@ -250,8 +361,10 @@ SDValue TriCoreTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue tricoreCC;
   SDValue Flag = EmitCMP(LHS, RHS, CC, dl, DAG, tricoreCC);
 
+  //Flag.getValue(1).dump();
+
   return DAG.getNode(TriCoreISD::BR_CC, dl, Op.getValueType(),
-                       Chain, Dest, Flag, tricoreCC);
+                       Chain, Dest, Flag.getValue(0), tricoreCC, Flag.getValue(1));
 
 }
 
