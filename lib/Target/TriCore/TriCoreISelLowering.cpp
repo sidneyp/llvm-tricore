@@ -428,8 +428,7 @@ TriCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   // to set, the condition code register to branch on, the true/false values to
   // select between, and a branch opcode to use.
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction::iterator I = BB;
-  ++I;
+  MachineFunction::iterator I = ++BB->getIterator();
 
   //  thisMBB:
   //  ...
@@ -704,19 +703,19 @@ SDValue TriCoreTargetLowering::LowerFormalArguments(SDValue Chain,
 			// If the argument is a pointer type then create a AddrRegsClass
 			// Virtual register.
 			if (TCCH.isRegValPtrType(MF)) {
-				VA.setValVT(MVT(MVT::iPTR));
+				//VA.setValVT(MVT(MVT::iPTR));
 				VReg = RegInfo.createVirtualRegister(&TriCore::AddrRegsRegClass);
 				RegInfo.addLiveIn(VA.getLocReg(), VReg); //mark the register is inuse
 				TCCH.saveRegRecord(funName, VA.getLocReg(), true);
 				TCCH++;
-				ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, RegVT, MVT::iPTR);
+				ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, MVT::iPTR);
 			}
 			// else place it inside a data register.
 			else {
 				VReg = RegInfo.createVirtualRegister(&TriCore::DataRegsRegClass);
 				RegInfo.addLiveIn(VA.getLocReg(), VReg); //mark the register is inuse
 				TCCH.saveRegRecord(funName, VA.getLocReg(), false);
-				ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, RegVT, MVT::i32);
+				ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, MVT::i32);
 				TCCH++;
 			}
 

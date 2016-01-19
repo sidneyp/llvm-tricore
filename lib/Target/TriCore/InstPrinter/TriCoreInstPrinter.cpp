@@ -37,6 +37,9 @@ void TriCoreInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   printAnnotation(O, Annot);
 }
 
+
+//FIXME: MCSymbolRefExpr::VK_TRICORE_HI_OFFSET is not defined
+/*
 static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
   int Offset = 0;
   const MCSymbolRefExpr *SRE;
@@ -68,7 +71,7 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
     OS << Offset;
   }
 }
-
+*/
 void TriCoreInstPrinter::printPCRelImmOperand(const MCInst *MI, unsigned OpNo,
                                              raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);

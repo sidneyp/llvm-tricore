@@ -504,6 +504,8 @@ SDNode *TriCoreDAGToDAGISel::Select(SDNode *N) {
 	}
 	case ISD::STORE: {
 		ptyType = false;
+
+		//FIXME: ‘class llvm::SDNode’ has no member named ‘getArgType’
 		ptyType = (N->getOperand(1)->getArgType() == (int64_t)MVT::iPTR) ?
 				true : false;
 		break;
