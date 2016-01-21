@@ -36,6 +36,8 @@ using namespace llvm;
 // Pin the vtable to this file.
 void TriCoreInstrInfo::anchor() {}
 
+
+//FIXME: undefined reference to `llvm::TriCoreGenInstrInfo::TriCoreGenInstrInfo(int, int, int)
 TriCoreInstrInfo::TriCoreInstrInfo()
   : TriCoreGenInstrInfo(TriCore::ADJCALLSTACKDOWN, TriCore::ADJCALLSTACKUP),
     RI() {
