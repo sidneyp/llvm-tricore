@@ -530,12 +530,15 @@ def SHArr : RR<0x0F, 0x01, (outs DataRegs:$d), (ins DataRegs:$s1, DataRegs:$s2),
 // Return Instructions
 //===----------------------------------------------------------------------===//
 
-let isTerminator = 1, isReturn = 1,
-  isBarrier = 1, Uses =[PCXI, PSW, FCX],
-  Defs= [PSW, PCXI, PC, FCX] in
-  def RETsr : T16<0x00, (outs), (ins variable_ops), "ret",  [(TriCoreRetFlag)]> {
-   let Inst{15-12} = 0x9;
-  }
+let isTerminator = 1, isReturn = 1, isBarrier = 1 in 
+   def RET : T32<(outs), (ins variable_ops), "ret",  [(TriCoreRetFlag)]>;
+
+//let isTerminator = 1, isReturn = 1,
+//  isBarrier = 1, Uses =[PCXI, PSW, FCX],
+//  Defs= [PSW, PCXI, PC, FCX] in
+//  def RETsr : T16<0x00, (outs), (ins variable_ops), "ret",  [(TriCoreRetFlag)]> {
+//   let Inst{15-12} = 0x9;
+//  }
 
 //let isTerminator = 1, isReturn = 1,
 //  isBarrier = 1, Uses = [A11] in
