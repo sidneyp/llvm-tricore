@@ -589,6 +589,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::wasm32:
   case Triple::wasm64:
   case Triple::xcore:
+  case Triple::tricore:
     return Triple::ELF;
 
   case Triple::ppc:
