@@ -125,3 +125,83 @@ end:
   ret <8 x i16> %t6
 }
 
+; The widening shuffle must be inserted at a valid point (after the PHIs). 
+
+define <4 x double> @pr25999_phis1(i1 %c, <2 x double> %a, <4 x double> %b) {
+; CHECK-LABEL: @pr25999_phis1(
+; CHECK:       %tmp1 = phi <2 x double> [ %a, %bb1 ], [ %r, %bb2 ]
+; CHECK-NEXT:  %tmp2 = phi <4 x double> [ %b, %bb1 ], [ zeroinitializer, %bb2 ]
+; CHECK-NEXT:  %[[WIDEVEC:.*]] = shufflevector <2 x double> %tmp1, <2 x double> undef, <4 x i32> <i32 0, i32 undef, i32 undef, i32 undef>
+; CHECK-NEXT:  %tmp4 = shufflevector <4 x double> %tmp2, <4 x double> %[[WIDEVEC]], <4 x i32> <i32 0, i32 1, i32 4, i32 3>
+; CHECK-NEXT:  ret <4 x double> %tmp4
+bb1:
+  br i1 %c, label %bb2, label %bb3
+
+bb2:
+  %r = call <2 x double> @dummy(<2 x double> %a)
+  br label %bb3
+
+bb3:
+  %tmp1 = phi <2 x double> [ %a, %bb1 ], [ %r, %bb2 ]
+  %tmp2 = phi <4 x double> [ %b, %bb1 ], [ zeroinitializer, %bb2 ]
+  %tmp3 = extractelement <2 x double> %tmp1, i32 0
+  %tmp4 = insertelement <4 x double> %tmp2, double %tmp3, i32 2
+  ret <4 x double> %tmp4
+}
+
+declare <2 x double> @dummy(<2 x double>)
+
+define <4 x double> @pr25999_phis2(i1 %c, <2 x double> %a, <4 x double> %b) {
+; CHECK-LABEL: @pr25999_phis2(
+; CHECK:       %tmp1 = phi <2 x double> [ %a, %bb1 ], [ %r, %bb2 ]
+; CHECK-NEXT:  %tmp2 = phi <4 x double> [ %b, %bb1 ], [ zeroinitializer, %bb2 ]
+; CHECK-NEXT:  %d = fadd <2 x double> %tmp1, %tmp1
+; CHECK-NEXT:  %[[WIDEVEC:.*]] = shufflevector <2 x double> %d, <2 x double> undef, <4 x i32> <i32 0, i32 undef, i32 undef, i32 undef>
+; CHECK-NEXT:  %tmp4 = shufflevector <4 x double> %tmp2, <4 x double> %[[WIDEVEC]], <4 x i32> <i32 0, i32 1, i32 4, i32 3>
+; CHECK-NEXT:  ret <4 x double> %tmp4
+bb1:
+  br i1 %c, label %bb2, label %bb3
+
+bb2:
+  %r = call <2 x double> @dummy(<2 x double> %a)
+  br label %bb3
+
+bb3:
+  %tmp1 = phi <2 x double> [ %a, %bb1 ], [ %r, %bb2 ]
+  %tmp2 = phi <4 x double> [ %b, %bb1 ], [ zeroinitializer, %bb2 ]
+  %d = fadd <2 x double> %tmp1, %tmp1
+  %tmp3 = extractelement <2 x double> %d, i32 0
+  %tmp4 = insertelement <4 x double> %tmp2, double %tmp3, i32 2
+  ret <4 x double> %tmp4
+}
+
+; PR26354: https://llvm.org/bugs/show_bug.cgi?id=26354
+; Don't create a shufflevector if we know that we're not going to replace the insertelement.
+
+define double @pr26354(<2 x double>* %tmp, i1 %B) {
+; CHECK-LABEL: @pr26354(
+; CHECK:       %ld = load <2 x double>, <2 x double>* %tmp
+; CHECK-NEXT:  %e1 = extractelement <2 x double> %ld, i32 0
+; CHECK-NEXT:  br i1 %B, label %if, label %end
+; CHECK:       if:
+; CHECK-NEXT:  %e2 = extractelement <2 x double> %ld, i32 1
+; CHECK-NEXT:  %i1 = insertelement <4 x double>
+; CHECK-NEXT:  br label %end
+
+entry:
+  %ld = load <2 x double>, <2 x double>* %tmp
+  %e1 = extractelement <2 x double> %ld, i32 0
+  %e2 = extractelement <2 x double> %ld, i32 1
+  br i1 %B, label %if, label %end
+
+if:
+  %i1 = insertelement <4 x double> zeroinitializer, double %e2, i32 3
+  br label %end
+
+end:
+  %ph = phi <4 x double> [ undef, %entry ], [ %i1, %if ]
+  %e3 = extractelement <4 x double> %ph, i32 1
+  %mu = fmul double %e1, %e3
+  ret double %mu
+}
+

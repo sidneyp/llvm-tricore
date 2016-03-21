@@ -63,7 +63,6 @@ const char *Triple::getArchTypeName(ArchType Kind) {
   case shave:       return "shave";
   case wasm32:      return "wasm32";
   case wasm64:      return "wasm64";
-  case tricore:     return "tricore";
   }
 
   llvm_unreachable("Invalid ArchType!");
@@ -130,7 +129,6 @@ const char *Triple::getArchTypePrefix(ArchType Kind) {
   case shave:       return "shave";
   case wasm32:
   case wasm64:      return "wasm";
-  case tricore:     return "tricore";
   }
 }
 
@@ -273,7 +271,6 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("shave", shave)
     .Case("wasm32", wasm32)
     .Case("wasm64", wasm64)
-    .Case("tricore", tricore)
     .Default(UnknownArch);
 }
 
@@ -341,9 +338,9 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     // FIXME: Do we need to support these?
     .Cases("i786", "i886", "i986", Triple::x86)
     .Cases("amd64", "x86_64", "x86_64h", Triple::x86_64)
-    .Case("powerpc", Triple::ppc)
-    .Cases("powerpc64", "ppu", Triple::ppc64)
-    .Case("powerpc64le", Triple::ppc64le)
+    .Cases("powerpc", "ppc32", Triple::ppc)
+    .Cases("powerpc64", "ppu", "ppc64", Triple::ppc64)
+    .Cases("powerpc64le", "ppc64le", Triple::ppc64le)
     .Case("xscale", Triple::arm)
     .Case("xscaleeb", Triple::armeb)
     .Case("aarch64", Triple::aarch64)
@@ -362,7 +359,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("r600", Triple::r600)
     .Case("amdgcn", Triple::amdgcn)
     .Case("hexagon", Triple::hexagon)
-    .Case("s390x", Triple::systemz)
+    .Cases("s390x", "systemz", Triple::systemz)
     .Case("sparc", Triple::sparc)
     .Case("sparcel", Triple::sparcel)
     .Cases("sparcv9", "sparc64", Triple::sparcv9)
@@ -382,7 +379,6 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("shave", Triple::shave)
     .Case("wasm32", Triple::wasm32)
     .Case("wasm64", Triple::wasm64)
-    .Case("tricore", Triple::tricore)
     .Default(Triple::UnknownArch);
 
   // Some architectures require special parsing logic just to compute the
@@ -589,7 +585,6 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::wasm32:
   case Triple::wasm64:
   case Triple::xcore:
-  case Triple::tricore:
     return Triple::ELF;
 
   case Triple::ppc:
@@ -1118,7 +1113,6 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::kalimba:
   case llvm::Triple::shave:
   case llvm::Triple::wasm32:
-  case llvm::Triple::tricore:
     return 32;
 
   case llvm::Triple::aarch64:
@@ -1192,7 +1186,6 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::xcore:
   case Triple::shave:
   case Triple::wasm32:
-  case Triple::tricore:
     // Already 32-bit.
     break;
 
@@ -1226,7 +1219,6 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::xcore:
   case Triple::sparcel:
   case Triple::shave:
-  case Triple::tricore:
     T.setArch(UnknownArch);
     break;
 
@@ -1296,7 +1288,6 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::x86:
   case Triple::x86_64:
   case Triple::xcore:
-  case Triple::tricore:
 
   // ARM is intentionally unsupported here, changing the architecture would
   // drop any arch suffixes.
@@ -1338,7 +1329,6 @@ Triple Triple::getLittleEndianArchVariant() const {
   case Triple::sparcv9:
   case Triple::systemz:
   case Triple::tce:
-  case Triple::tricore:
 
   // ARM is intentionally unsupported here, changing the architecture would
   // drop any arch suffixes.

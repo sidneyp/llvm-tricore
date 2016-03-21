@@ -290,13 +290,11 @@ public:
     VK_Hexagon_LD_PLT,
     VK_Hexagon_IE,
     VK_Hexagon_IE_GOT,
-    VK_TPREL,
-    VK_DTPREL,
 
-    VK_TRICORE_LO,
-    VK_TRICORE_HI,
-    VK_TRICORE_LO_OFFSET,
-    VK_TRICORE_HI_OFFSET
+    VK_WebAssembly_FUNCTION, // Function table index, rather than virtual addr
+
+    VK_TPREL,
+    VK_DTPREL
   };
 
 private:

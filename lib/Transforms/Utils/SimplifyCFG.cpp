@@ -90,6 +90,11 @@ static cl::opt<bool> SpeculateOneExpensiveInst(
     cl::desc("Allow exactly one expensive instruction to be speculatively "
              "executed"));
 
+static cl::opt<unsigned> MaxSpeculationDepth(
+    "max-speculation-depth", cl::Hidden, cl::init(10),
+    cl::desc("Limit maximum recursion depth when calculating costs of "
+             "speculatively executed instructions"));
+
 STATISTIC(NumBitMaps, "Number of switch instructions turned into bitmaps");
 STATISTIC(NumLinearMaps, "Number of switch instructions turned into linear mapping");
 STATISTIC(NumLookupTables, "Number of switch instructions turned into lookup tables");
@@ -141,6 +146,8 @@ class SimplifyCFGOpt {
 
   bool SimplifyReturn(ReturnInst *RI, IRBuilder<> &Builder);
   bool SimplifyResume(ResumeInst *RI, IRBuilder<> &Builder);
+  bool SimplifySingleResume(ResumeInst *RI);
+  bool SimplifyCommonResume(ResumeInst *RI);
   bool SimplifyCleanupReturn(CleanupReturnInst *RI);
   bool SimplifyUnreachable(UnreachableInst *UI);
   bool SimplifySwitch(SwitchInst *SI, IRBuilder<> &Builder);
@@ -267,6 +274,13 @@ static bool DominatesMergePoint(Value *V, BasicBlock *BB,
                                 unsigned &CostRemaining,
                                 const TargetTransformInfo &TTI,
                                 unsigned Depth = 0) {
+  // It is possible to hit a zero-cost cycle (phi/gep instructions for example),
+  // so limit the recursion depth.
+  // TODO: While this recursion limit does prevent pathological behavior, it
+  // would be better to track visited instructions to avoid cycles.
+  if (Depth == MaxSpeculationDepth)
+    return false;
+
   Instruction *I = dyn_cast<Instruction>(V);
   if (!I) {
     // Non-instructions all dominate instructions, but not all constantexprs
@@ -3239,14 +3253,101 @@ static bool SimplifyBranchOnICmpChain(BranchInst *BI, IRBuilder<> &Builder,
 }
 
 bool SimplifyCFGOpt::SimplifyResume(ResumeInst *RI, IRBuilder<> &Builder) {
-  // If this is a trivial landing pad that just continues unwinding the caught
-  // exception then zap the landing pad, turning its invokes into calls.
+  if (isa<PHINode>(RI->getValue()))
+    return SimplifyCommonResume(RI);
+  else if (isa<LandingPadInst>(RI->getParent()->getFirstNonPHI()) &&
+           RI->getValue() == RI->getParent()->getFirstNonPHI())
+    // The resume must unwind the exception that caused control to branch here.
+    return SimplifySingleResume(RI);
+
+  return false;
+}
+
+// Simplify resume that is shared by several landing pads (phi of landing pad).
+bool SimplifyCFGOpt::SimplifyCommonResume(ResumeInst *RI) {
+  BasicBlock *BB = RI->getParent();
+
+  // Check that there are no other instructions except for debug intrinsics
+  // between the phi of landing pads (RI->getValue()) and resume instruction.
+  BasicBlock::iterator I = cast<Instruction>(RI->getValue())->getIterator(),
+		  	  	  	   E = RI->getIterator();
+  while (++I != E)
+    if (!isa<DbgInfoIntrinsic>(I))
+      return false;
+
+  SmallSet<BasicBlock *, 4> TrivialUnwindBlocks;
+  auto *PhiLPInst = cast<PHINode>(RI->getValue());
+
+  // Check incoming blocks to see if any of them are trivial.
+  for (unsigned Idx = 0, End = PhiLPInst->getNumIncomingValues();
+       Idx != End; Idx++) {
+    auto *IncomingBB = PhiLPInst->getIncomingBlock(Idx);
+    auto *IncomingValue = PhiLPInst->getIncomingValue(Idx);
+
+    // If the block has other successors, we can not delete it because
+    // it has other dependents.
+    if (IncomingBB->getUniqueSuccessor() != BB)
+      continue;
+
+    auto *LandingPad =
+        dyn_cast<LandingPadInst>(IncomingBB->getFirstNonPHI());
+    // Not the landing pad that caused the control to branch here.
+    if (IncomingValue != LandingPad)
+      continue;
+
+    bool isTrivial = true;
+
+    I = IncomingBB->getFirstNonPHI()->getIterator();
+    E = IncomingBB->getTerminator()->getIterator();
+    while (++I != E)
+      if (!isa<DbgInfoIntrinsic>(I)) {
+        isTrivial = false;
+        break;
+      }
+
+    if (isTrivial)
+      TrivialUnwindBlocks.insert(IncomingBB);
+  }
+
+  // If no trivial unwind blocks, don't do any simplifications.
+  if (TrivialUnwindBlocks.empty()) return false;
+
+  // Turn all invokes that unwind here into calls.
+  for (auto *TrivialBB : TrivialUnwindBlocks) {
+    // Blocks that will be simplified should be removed from the phi node.
+    // Note there could be multiple edges to the resume block, and we need
+    // to remove them all.
+    while (PhiLPInst->getBasicBlockIndex(TrivialBB) != -1)
+      BB->removePredecessor(TrivialBB, true);
+
+    for (pred_iterator PI = pred_begin(TrivialBB), PE = pred_end(TrivialBB);
+         PI != PE;) {
+      BasicBlock *Pred = *PI++;
+      removeUnwindEdge(Pred);
+    }
+
+    // In each SimplifyCFG run, only the current processed block can be erased.
+    // Otherwise, it will break the iteration of SimplifyCFG pass. So instead
+    // of erasing TrivialBB, we only remove the branch to the common resume
+    // block so that we can later erase the resume block since it has no
+    // predecessors.
+    TrivialBB->getTerminator()->eraseFromParent();
+    new UnreachableInst(RI->getContext(), TrivialBB);
+  }
+
+  // Delete the resume block if all its predecessors have been removed.
+  if (pred_empty(BB))
+    BB->eraseFromParent();
+
+  return !TrivialUnwindBlocks.empty();
+}
+
+// Simplify resume that is only used by a single (non-phi) landing pad.
+bool SimplifyCFGOpt::SimplifySingleResume(ResumeInst *RI) {
   BasicBlock *BB = RI->getParent();
   LandingPadInst *LPInst = dyn_cast<LandingPadInst>(BB->getFirstNonPHI());
-  if (RI->getValue() != LPInst)
-    // Not a landing pad, or the resume is not unwinding the exception that
-    // caused control to branch here.
-    return false;
+  assert (RI->getValue() == LPInst &&
+          "Resume must unwind the exception that caused control to here");
 
   // Check that there are no other instructions except for debug intrinsics.
   BasicBlock::iterator I = LPInst->getIterator(), E = RI->getIterator();

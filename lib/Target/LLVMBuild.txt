@@ -32,7 +32,6 @@ subdirectories =
  PowerPC
  Sparc
  SystemZ
- TriCore
  WebAssembly
  X86
  XCore

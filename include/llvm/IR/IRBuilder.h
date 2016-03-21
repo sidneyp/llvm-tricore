@@ -178,10 +178,10 @@ public:
   void clearFastMathFlags() { FMF.clear(); }
 
   /// \brief Set the floating point math metadata to be used.
-  void SetDefaultFPMathTag(MDNode *FPMathTag) { DefaultFPMathTag = FPMathTag; }
+  void setDefaultFPMathTag(MDNode *FPMathTag) { DefaultFPMathTag = FPMathTag; }
 
   /// \brief Set the fast-math flags to be used with generated fp-math operators
-  void SetFastMathFlags(FastMathFlags NewFMF) { FMF = NewFMF; }
+  void setFastMathFlags(FastMathFlags NewFMF) { FMF = NewFMF; }
 
   //===--------------------------------------------------------------------===//
   // RAII helpers.
@@ -1539,16 +1539,7 @@ public:
   }
 
   CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args = None,
-                       ArrayRef<OperandBundleDef> OpBundles = None,
                        const Twine &Name = "", MDNode *FPMathTag = nullptr) {
-    CallInst *CI = CallInst::Create(Callee, Args, OpBundles);
-    if (isa<FPMathOperator>(CI))
-      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
-    return Insert(CI, Name);
-  }
-
-  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
-                       const Twine &Name, MDNode *FPMathTag = nullptr) {
     PointerType *PTy = cast<PointerType>(Callee->getType());
     FunctionType *FTy = cast<FunctionType>(PTy->getElementType());
     return CreateCall(FTy, Callee, Args, Name, FPMathTag);
@@ -1558,6 +1549,15 @@ public:
                        ArrayRef<Value *> Args, const Twine &Name = "",
                        MDNode *FPMathTag = nullptr) {
     CallInst *CI = CallInst::Create(FTy, Callee, Args, DefaultOperandBundles);
+    if (isa<FPMathOperator>(CI))
+      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
+    return Insert(CI, Name);
+  }
+
+  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
+                       ArrayRef<OperandBundleDef> OpBundles,
+                       const Twine &Name = "", MDNode *FPMathTag = nullptr) {
+    CallInst *CI = CallInst::Create(Callee, Args, OpBundles);
     if (isa<FPMathOperator>(CI))
       CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
     return Insert(CI, Name);

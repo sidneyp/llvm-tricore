@@ -36,7 +36,7 @@ if(NOT DEFINED LLVM_VERSION_PATCH)
   set(LLVM_VERSION_PATCH 0)
 endif()
 if(NOT DEFINED LLVM_VERSION_SUFFIX)
-  set(LLVM_VERSION_SUFFIX svn)
+  set(LLVM_VERSION_SUFFIX "")
 endif()
 
 if (POLICY CMP0048)
@@ -214,7 +214,6 @@ set(LLVM_ALL_TARGETS
   PowerPC
   Sparc
   SystemZ
-  TriCore
   X86
   XCore
   )
