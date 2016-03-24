@@ -98,10 +98,8 @@ void LLVMMoveToNextSection(LLVMSectionIteratorRef SI) {
 
 void LLVMMoveToContainingSection(LLVMSectionIteratorRef Sect,
                                  LLVMSymbolIteratorRef Sym) {
-  ErrorOr<section_iterator> SecOrErr = (*unwrap(Sym))->getSection();
-  if (std::error_code ec = SecOrErr.getError())
+  if (std::error_code ec = (*unwrap(Sym))->getSection(*unwrap(Sect)))
     report_fatal_error(ec.message());
-  *unwrap(Sect) = *SecOrErr;
 }
 
 // ObjectFile Symbol iterators

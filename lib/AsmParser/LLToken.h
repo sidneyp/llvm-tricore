@@ -49,14 +49,10 @@ namespace lltok {
     kw_external, kw_thread_local,
     kw_localdynamic, kw_initialexec, kw_localexec,
     kw_zeroinitializer,
-    kw_undef, kw_null, kw_none,
+    kw_undef, kw_null,
     kw_to,
-    kw_caller,
-    kw_within,
-    kw_from,
     kw_tail,
     kw_musttail,
-    kw_notail,
     kw_target,
     kw_triple,
     kw_unwind,
@@ -100,9 +96,6 @@ namespace lltok {
     kw_webkit_jscc, kw_anyregcc,
     kw_preserve_mostcc, kw_preserve_allcc,
     kw_ghccc,
-    kw_x86_intrcc,
-    kw_hhvmcc, kw_hhvm_ccc,
-    kw_cxx_fast_tlscc,
 
     // Attributes:
     kw_attributes,
@@ -116,8 +109,6 @@ namespace lltok {
     kw_convergent,
     kw_dereferenceable,
     kw_dereferenceable_or_null,
-    kw_inaccessiblememonly,
-    kw_inaccessiblemem_or_argmemonly,
     kw_inlinehint,
     kw_inreg,
     kw_jumptable,
@@ -130,7 +121,6 @@ namespace lltok {
     kw_noduplicate,
     kw_noimplicitfloat,
     kw_noinline,
-    kw_norecurse,
     kw_nonlazybind,
     kw_nonnull,
     kw_noredzone,
@@ -187,8 +177,7 @@ namespace lltok {
     kw_landingpad, kw_personality, kw_cleanup, kw_catch, kw_filter,
 
     kw_ret, kw_br, kw_switch, kw_indirectbr, kw_invoke, kw_resume,
-    kw_unreachable, kw_cleanupret, kw_catchswitch, kw_catchret, kw_catchpad,
-    kw_cleanuppad,
+    kw_unreachable,
 
     kw_alloca, kw_load, kw_store, kw_fence, kw_cmpxchg, kw_atomicrmw,
     kw_getelementptr,
@@ -220,7 +209,6 @@ namespace lltok {
     DwarfLang,         // DW_LANG_foo
     DwarfOp,           // DW_OP_foo
     DIFlag,            // DIFlagFoo
-    DwarfMacinfo,      // DW_MACINFO_foo
 
     // Type valued tokens (TyVal).
     Type,

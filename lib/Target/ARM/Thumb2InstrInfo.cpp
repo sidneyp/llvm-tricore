@@ -131,9 +131,11 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = *MF.getFrameInfo();
-  MachineMemOperand *MMO = MF.getMachineMemOperand(
-      MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOStore,
-      MFI.getObjectSize(FI), MFI.getObjectAlignment(FI));
+  MachineMemOperand *MMO =
+    MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI),
+                            MachineMemOperand::MOStore,
+                            MFI.getObjectSize(FI),
+                            MFI.getObjectAlignment(FI));
 
   if (RC == &ARM::GPRRegClass   || RC == &ARM::tGPRRegClass ||
       RC == &ARM::tcGPRRegClass || RC == &ARM::rGPRRegClass ||
@@ -169,9 +171,11 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
                      const TargetRegisterInfo *TRI) const {
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = *MF.getFrameInfo();
-  MachineMemOperand *MMO = MF.getMachineMemOperand(
-      MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOLoad,
-      MFI.getObjectSize(FI), MFI.getObjectAlignment(FI));
+  MachineMemOperand *MMO =
+    MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI),
+                            MachineMemOperand::MOLoad,
+                            MFI.getObjectSize(FI),
+                            MFI.getObjectAlignment(FI));
   DebugLoc DL;
   if (I != MBB.end()) DL = I->getDebugLoc();
 

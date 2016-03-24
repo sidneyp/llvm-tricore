@@ -35,7 +35,7 @@ struct R600RegisterInfo : public AMDGPURegisterInfo {
 
   /// \brief get the register class of the specified type to use in the
   /// CFGStructurizer
-  const TargetRegisterClass *getCFGStructurizerRegClass(MVT VT) const;
+  const TargetRegisterClass * getCFGStructurizerRegClass(MVT VT) const override;
 
   const RegClassWeight &
     getRegClassWeight(const TargetRegisterClass *RC) const override;

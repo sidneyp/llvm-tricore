@@ -353,7 +353,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
     MIOperands::PhysRegInfo PRI =
         MIOperands(I).analyzePhysReg(AArch64::NZCV, TRI);
 
-    if (PRI.Read) {
+    if (PRI.Reads) {
       // The ccmp doesn't produce exactly the same flags as the original
       // compare, so reject the transform if there are uses of the flags
       // besides the terminators.
@@ -362,7 +362,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
       return nullptr;
     }
 
-    if (PRI.Defined || PRI.Clobbered) {
+    if (PRI.Clobbers) {
       DEBUG(dbgs() << "Not convertible compare: " << *I);
       ++NumUnknNZCVDefs;
       return nullptr;
@@ -567,8 +567,8 @@ void SSACCmpConv::convert(SmallVectorImpl<MachineBasicBlock *> &RemovedBlocks) {
   // All CmpBB instructions are moved into Head, and CmpBB is deleted.
   // Update the CFG first.
   updateTailPHIs();
-  Head->removeSuccessor(CmpBB, true);
-  CmpBB->removeSuccessor(Tail, true);
+  Head->removeSuccessor(CmpBB);
+  CmpBB->removeSuccessor(Tail);
   Head->transferSuccessorsAndUpdatePHIs(CmpBB);
   DebugLoc TermDL = Head->getFirstTerminator()->getDebugLoc();
   TII->RemoveBranch(*Head);
@@ -786,13 +786,13 @@ void AArch64ConditionalCompares::updateDomTree(
   // convert() removes CmpBB which was previously dominated by Head.
   // CmpBB children should be transferred to Head.
   MachineDomTreeNode *HeadNode = DomTree->getNode(CmpConv.Head);
-  for (MachineBasicBlock *RemovedMBB : Removed) {
-    MachineDomTreeNode *Node = DomTree->getNode(RemovedMBB);
+  for (unsigned i = 0, e = Removed.size(); i != e; ++i) {
+    MachineDomTreeNode *Node = DomTree->getNode(Removed[i]);
     assert(Node != HeadNode && "Cannot erase the head node");
     assert(Node->getIDom() == HeadNode && "CmpBB should be dominated by Head");
     while (Node->getNumChildren())
       DomTree->changeImmediateDominator(Node->getChildren().back(), HeadNode);
-    DomTree->eraseNode(RemovedMBB);
+    DomTree->eraseNode(Removed[i]);
   }
 }
 
@@ -801,8 +801,8 @@ void
 AArch64ConditionalCompares::updateLoops(ArrayRef<MachineBasicBlock *> Removed) {
   if (!Loops)
     return;
-  for (MachineBasicBlock *RemovedMBB : Removed)
-    Loops->removeBlock(RemovedMBB);
+  for (unsigned i = 0, e = Removed.size(); i != e; ++i)
+    Loops->removeBlock(Removed[i]);
 }
 
 /// Invalidate MachineTraceMetrics before if-conversion.
@@ -899,7 +899,7 @@ bool AArch64ConditionalCompares::runOnMachineFunction(MachineFunction &MF) {
   Loops = getAnalysisIfAvailable<MachineLoopInfo>();
   Traces = &getAnalysis<MachineTraceMetrics>();
   MinInstr = nullptr;
-  MinSize = MF.getFunction()->optForMinSize();
+  MinSize = MF.getFunction()->hasFnAttribute(Attribute::MinSize);
 
   bool Changed = false;
   CmpConv.runOnMachineFunction(MF);

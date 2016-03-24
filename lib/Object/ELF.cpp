@@ -26,7 +26,6 @@ StringRef getELFRelocationTypeName(uint32_t Machine, uint32_t Type) {
     }
     break;
   case ELF::EM_386:
-  case ELF::EM_IAMCU:
     switch (Type) {
 #include "llvm/Support/ELFRelocs/i386.def"
     default:
@@ -87,13 +86,6 @@ StringRef getELFRelocationTypeName(uint32_t Machine, uint32_t Type) {
   case ELF::EM_SPARCV9:
     switch (Type) {
 #include "llvm/Support/ELFRelocs/Sparc.def"
-    default:
-      break;
-    }
-    break;
-  case ELF::EM_WEBASSEMBLY:
-    switch (Type) {
-#include "llvm/Support/ELFRelocs/WebAssembly.def"
     default:
       break;
     }

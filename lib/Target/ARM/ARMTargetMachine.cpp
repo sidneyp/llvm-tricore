@@ -66,9 +66,7 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
 static ARMBaseTargetMachine::ARMABI
 computeTargetABI(const Triple &TT, StringRef CPU,
                  const TargetOptions &Options) {
-  if (Options.MCOptions.getABIName() == "aapcs16")
-    return ARMBaseTargetMachine::ARM_ABI_AAPCS16;
-  else if (Options.MCOptions.getABIName().startswith("aapcs"))
+  if (Options.MCOptions.getABIName().startswith("aapcs"))
     return ARMBaseTargetMachine::ARM_ABI_AAPCS;
   else if (Options.MCOptions.getABIName().startswith("apcs"))
     return ARMBaseTargetMachine::ARM_ABI_APCS;
@@ -85,8 +83,6 @@ computeTargetABI(const Triple &TT, StringRef CPU,
         (TT.getOS() == llvm::Triple::UnknownOS && TT.isOSBinFormatMachO()) ||
         CPU.startswith("cortex-m")) {
       TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
-    } else if (TT.isWatchOS()) {
-      TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS16;
     } else {
       TargetABI = ARMBaseTargetMachine::ARM_ABI_APCS;
     }
@@ -110,7 +106,7 @@ computeTargetABI(const Triple &TT, StringRef CPU,
       if (TT.isOSNetBSD())
         TargetABI = ARMBaseTargetMachine::ARM_ABI_APCS;
       else
-        TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
+	TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
       break;
     }
   }
@@ -149,7 +145,7 @@ static std::string computeDataLayout(const Triple &TT, StringRef CPU,
   // to 64. We always ty to give them natural alignment.
   if (ABI == ARMBaseTargetMachine::ARM_ABI_APCS)
     Ret += "-v64:32:64-v128:32:128";
-  else if (ABI != ARMBaseTargetMachine::ARM_ABI_AAPCS16)
+  else
     Ret += "-v128:64:128";
 
   // Try to align aggregates to 32 bits (the default is 64 bits, which has no
@@ -161,7 +157,7 @@ static std::string computeDataLayout(const Triple &TT, StringRef CPU,
 
   // The stack is 128 bit aligned on NaCl, 64 bit aligned on AAPCS and 32 bit
   // aligned everywhere else.
-  if (TT.isOSNaCl() || ABI == ARMBaseTargetMachine::ARM_ABI_AAPCS16)
+  if (TT.isOSNaCl())
     Ret += "-S128";
   else if (ABI == ARMBaseTargetMachine::ARM_ABI_AAPCS)
     Ret += "-S64";
@@ -188,15 +184,6 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, const Triple &TT,
   if (Options.FloatABIType == FloatABI::Default)
     this->Options.FloatABIType =
         Subtarget.isTargetHardFloat() ? FloatABI::Hard : FloatABI::Soft;
-
-  // Default to triple-appropriate EABI
-  if (Options.EABIVersion == EABI::Default ||
-      Options.EABIVersion == EABI::Unknown) {
-    if (Subtarget.isTargetGNUAEABI())
-      this->Options.EABIVersion = EABI::GNU;
-    else
-      this->Options.EABIVersion = EABI::EABI5;
-  }
 }
 
 ARMBaseTargetMachine::~ARMBaseTargetMachine() {}
@@ -238,12 +225,12 @@ ARMBaseTargetMachine::getSubtargetImpl(const Function &F) const {
 }
 
 TargetIRAnalysis ARMBaseTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(ARMTTIImpl(this, F));
-  });
+  return TargetIRAnalysis(
+      [this](Function &F) { return TargetTransformInfo(ARMTTIImpl(this, F)); });
 }
 
-void ARMTargetMachine::anchor() {}
+
+void ARMTargetMachine::anchor() { }
 
 ARMTargetMachine::ARMTargetMachine(const Target &T, const Triple &TT,
                                    StringRef CPU, StringRef FS,
@@ -257,7 +244,7 @@ ARMTargetMachine::ARMTargetMachine(const Target &T, const Triple &TT,
                        "support ARM mode execution!");
 }
 
-void ARMLETargetMachine::anchor() {}
+void ARMLETargetMachine::anchor() { }
 
 ARMLETargetMachine::ARMLETargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
@@ -266,7 +253,7 @@ ARMLETargetMachine::ARMLETargetMachine(const Target &T, const Triple &TT,
                                        CodeGenOpt::Level OL)
     : ARMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
-void ARMBETargetMachine::anchor() {}
+void ARMBETargetMachine::anchor() { }
 
 ARMBETargetMachine::ARMBETargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
@@ -275,7 +262,7 @@ ARMBETargetMachine::ARMBETargetMachine(const Target &T, const Triple &TT,
                                        CodeGenOpt::Level OL)
     : ARMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
-void ThumbTargetMachine::anchor() {}
+void ThumbTargetMachine::anchor() { }
 
 ThumbTargetMachine::ThumbTargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
@@ -286,7 +273,7 @@ ThumbTargetMachine::ThumbTargetMachine(const Target &T, const Triple &TT,
   initAsmInfo();
 }
 
-void ThumbLETargetMachine::anchor() {}
+void ThumbLETargetMachine::anchor() { }
 
 ThumbLETargetMachine::ThumbLETargetMachine(const Target &T, const Triple &TT,
                                            StringRef CPU, StringRef FS,
@@ -295,7 +282,7 @@ ThumbLETargetMachine::ThumbLETargetMachine(const Target &T, const Triple &TT,
                                            CodeGenOpt::Level OL)
     : ThumbTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
-void ThumbBETargetMachine::anchor() {}
+void ThumbBETargetMachine::anchor() { }
 
 ThumbBETargetMachine::ThumbBETargetMachine(const Target &T, const Triple &TT,
                                            StringRef CPU, StringRef FS,
@@ -361,13 +348,7 @@ bool ARMPassConfig::addPreISel() {
     // tricky when doing code gen per function.
     bool OnlyOptimizeForSize = (TM->getOptLevel() < CodeGenOpt::Aggressive) &&
                                (EnableGlobalMerge == cl::BOU_UNSET);
-    // Merging of extern globals is enabled by default on non-Mach-O as we
-    // expect it to be generally either beneficial or harmless. On Mach-O it
-    // is disabled as we emit the .subsections_via_symbols directive which
-    // means that merging extern globals is not safe.
-    bool MergeExternalByDefault = !TM->getTargetTriple().isOSBinFormatMachO();
-    addPass(createGlobalMergePass(TM, 127, OnlyOptimizeForSize,
-                                  MergeExternalByDefault));
+    addPass(createGlobalMergePass(TM, 127, OnlyOptimizeForSize));
   }
 
   return false;
@@ -375,6 +356,9 @@ bool ARMPassConfig::addPreISel() {
 
 bool ARMPassConfig::addInstSelector() {
   addPass(createARMISelDag(getARMTargetMachine(), getOptLevel()));
+
+  if (TM->getTargetTriple().isOSBinFormatELF() && TM->Options.EnableFastISel)
+    addPass(createARMGlobalBaseRegPass());
   return false;
 }
 

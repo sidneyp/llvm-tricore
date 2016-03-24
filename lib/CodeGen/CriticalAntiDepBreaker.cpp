@@ -52,13 +52,14 @@ void CriticalAntiDepBreaker::StartBlock(MachineBasicBlock *BB) {
   // Clear "do not change" set.
   KeepRegs.reset();
 
-  bool IsReturnBlock = BB->isReturnBlock();
+  bool IsReturnBlock = (BBSize != 0 && BB->back().isReturn());
 
   // Examine the live-in regs of all successors.
   for (MachineBasicBlock::succ_iterator SI = BB->succ_begin(),
          SE = BB->succ_end(); SI != SE; ++SI)
-    for (const auto &LI : (*SI)->liveins()) {
-      for (MCRegAliasIterator AI(LI.PhysReg, TRI, true); AI.isValid(); ++AI) {
+    for (MachineBasicBlock::livein_iterator I = (*SI)->livein_begin(),
+           E = (*SI)->livein_end(); I != E; ++I) {
+      for (MCRegAliasIterator AI(*I, TRI, true); AI.isValid(); ++AI) {
         unsigned Reg = *AI;
         Classes[Reg] = reinterpret_cast<TargetRegisterClass *>(-1);
         KillIndices[Reg] = BBSize;

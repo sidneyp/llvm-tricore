@@ -35,8 +35,8 @@ using namespace llvm;
 
 // Explicit instantiations of SymbolTableListTraits since some of the methods
 // are not in the public header file...
-template class llvm::SymbolTableListTraits<Argument>;
-template class llvm::SymbolTableListTraits<BasicBlock>;
+template class llvm::SymbolTableListTraits<Argument, Function>;
+template class llvm::SymbolTableListTraits<BasicBlock, Function>;
 
 //===----------------------------------------------------------------------===//
 // Argument Implementation
@@ -235,11 +235,11 @@ Type *Function::getReturnType() const {
 }
 
 void Function::removeFromParent() {
-  getParent()->getFunctionList().remove(getIterator());
+  getParent()->getFunctionList().remove(this);
 }
 
 void Function::eraseFromParent() {
-  getParent()->getFunctionList().erase(getIterator());
+  getParent()->getFunctionList().erase(this);
 }
 
 //===----------------------------------------------------------------------===//
@@ -248,7 +248,7 @@ void Function::eraseFromParent() {
 
 Function::Function(FunctionType *Ty, LinkageTypes Linkage, const Twine &name,
                    Module *ParentModule)
-    : GlobalObject(Ty, Value::FunctionVal,
+    : GlobalObject(PointerType::getUnqual(Ty), Value::FunctionVal,
                    OperandTraits<Function>::op_begin(this), 0, Linkage, name),
       Ty(Ty) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
@@ -279,6 +279,9 @@ Function::~Function() {
 
   // Remove the function from the on-the-side GC table.
   clearGC();
+
+  // FIXME: needed by operator delete
+  setFunctionNumOperands(1);
 }
 
 void Function::BuildLazyArguments() const {
@@ -325,15 +328,14 @@ void Function::dropAllReferences() {
   while (!BasicBlocks.empty())
     BasicBlocks.begin()->eraseFromParent();
 
-  // Drop uses of any optional data (real or placeholder).
-  if (getNumOperands()) {
-    User::dropAllReferences();
-    setNumHungOffUseOperands(0);
-    setValueSubclassData(getSubclassDataFromValue() & ~0xe);
-  }
+  // Prefix and prologue data are stored in a side table.
+  setPrefixData(nullptr);
+  setPrologueData(nullptr);
 
   // Metadata is stored in a side-table.
   clearMetadata();
+
+  setPersonalityFn(nullptr);
 }
 
 void Function::addAttribute(unsigned i, Attribute::AttrKind attr) {
@@ -366,43 +368,73 @@ void Function::addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes) {
   setAttributes(PAL);
 }
 
-const std::string &Function::getGC() const {
-  assert(hasGC() && "Function has no collector");
-  return getContext().getGC(*this);
+// Maintain the GC name for each function in an on-the-side table. This saves
+// allocating an additional word in Function for programs which do not use GC
+// (i.e., most programs) at the cost of increased overhead for clients which do
+// use GC.
+static DenseMap<const Function*,PooledStringPtr> *GCNames;
+static StringPool *GCNamePool;
+static ManagedStatic<sys::SmartRWMutex<true> > GCLock;
+
+bool Function::hasGC() const {
+  sys::SmartScopedReader<true> Reader(*GCLock);
+  return GCNames && GCNames->count(this);
 }
 
-void Function::setGC(const std::string Str) {
-  setValueSubclassDataBit(14, !Str.empty());
-  getContext().setGC(*this, std::move(Str));
+const char *Function::getGC() const {
+  assert(hasGC() && "Function has no collector");
+  sys::SmartScopedReader<true> Reader(*GCLock);
+  return *(*GCNames)[this];
+}
+
+void Function::setGC(const char *Str) {
+  sys::SmartScopedWriter<true> Writer(*GCLock);
+  if (!GCNamePool)
+    GCNamePool = new StringPool();
+  if (!GCNames)
+    GCNames = new DenseMap<const Function*,PooledStringPtr>();
+  (*GCNames)[this] = GCNamePool->intern(Str);
 }
 
 void Function::clearGC() {
-  if (!hasGC())
-    return;
-  getContext().deleteGC(*this);
-  setValueSubclassDataBit(14, false);
+  sys::SmartScopedWriter<true> Writer(*GCLock);
+  if (GCNames) {
+    GCNames->erase(this);
+    if (GCNames->empty()) {
+      delete GCNames;
+      GCNames = nullptr;
+      if (GCNamePool->empty()) {
+        delete GCNamePool;
+        GCNamePool = nullptr;
+      }
+    }
+  }
 }
 
-/// Copy all additional attributes (those not needed to create a Function) from
-/// the Function Src to this one.
+/// copyAttributesFrom - copy all additional attributes (those not needed to
+/// create a Function) from the Function Src to this one.
 void Function::copyAttributesFrom(const GlobalValue *Src) {
+  assert(isa<Function>(Src) && "Expected a Function!");
   GlobalObject::copyAttributesFrom(Src);
-  const Function *SrcF = dyn_cast<Function>(Src);
-  if (!SrcF)
-    return;
-
+  const Function *SrcF = cast<Function>(Src);
   setCallingConv(SrcF->getCallingConv());
   setAttributes(SrcF->getAttributes());
   if (SrcF->hasGC())
     setGC(SrcF->getGC());
   else
     clearGC();
-  if (SrcF->hasPersonalityFn())
-    setPersonalityFn(SrcF->getPersonalityFn());
   if (SrcF->hasPrefixData())
     setPrefixData(SrcF->getPrefixData());
+  else
+    setPrefixData(nullptr);
   if (SrcF->hasPrologueData())
     setPrologueData(SrcF->getPrologueData());
+  else
+    setPrologueData(nullptr);
+  if (SrcF->hasPersonalityFn())
+    setPersonalityFn(SrcF->getPersonalityFn());
+  else
+    setPersonalityFn(nullptr);
 }
 
 /// \brief This does the actual lookup of an intrinsic ID which
@@ -460,10 +492,7 @@ static std::string getMangledTypeStr(Type* Ty) {
       Result += "vararg";
     // Ensure nested function types are distinguishable.
     Result += "f"; 
-  } else if (isa<VectorType>(Ty))
-    Result += "v" + utostr(Ty->getVectorNumElements()) +
-      getMangledTypeStr(Ty->getVectorElementType());
-  else if (Ty)
+  } else if (Ty)
     Result += EVT::getEVT(Ty).getEVTString();
   return Result;
 }
@@ -512,25 +541,22 @@ enum IIT_Info {
   // Values from 16+ are only encodable with the inefficient encoding.
   IIT_V64  = 16,
   IIT_MMX  = 17,
-  IIT_TOKEN = 18,
-  IIT_METADATA = 19,
-  IIT_EMPTYSTRUCT = 20,
-  IIT_STRUCT2 = 21,
-  IIT_STRUCT3 = 22,
-  IIT_STRUCT4 = 23,
-  IIT_STRUCT5 = 24,
-  IIT_EXTEND_ARG = 25,
-  IIT_TRUNC_ARG = 26,
-  IIT_ANYPTR = 27,
-  IIT_V1   = 28,
-  IIT_VARARG = 29,
-  IIT_HALF_VEC_ARG = 30,
-  IIT_SAME_VEC_WIDTH_ARG = 31,
-  IIT_PTR_TO_ARG = 32,
-  IIT_VEC_OF_PTRS_TO_ELT = 33,
-  IIT_I128 = 34,
-  IIT_V512 = 35,
-  IIT_V1024 = 36
+  IIT_METADATA = 18,
+  IIT_EMPTYSTRUCT = 19,
+  IIT_STRUCT2 = 20,
+  IIT_STRUCT3 = 21,
+  IIT_STRUCT4 = 22,
+  IIT_STRUCT5 = 23,
+  IIT_EXTEND_ARG = 24,
+  IIT_TRUNC_ARG = 25,
+  IIT_ANYPTR = 26,
+  IIT_V1   = 27,
+  IIT_VARARG = 28,
+  IIT_HALF_VEC_ARG = 29,
+  IIT_SAME_VEC_WIDTH_ARG = 30,
+  IIT_PTR_TO_ARG = 31,
+  IIT_VEC_OF_PTRS_TO_ELT = 32,
+  IIT_I128 = 33
 };
 
 
@@ -549,9 +575,6 @@ static void DecodeIITType(unsigned &NextElt, ArrayRef<unsigned char> Infos,
     return;
   case IIT_MMX:
     OutputTable.push_back(IITDescriptor::get(IITDescriptor::MMX, 0));
-    return;
-  case IIT_TOKEN:
-    OutputTable.push_back(IITDescriptor::get(IITDescriptor::Token, 0));
     return;
   case IIT_METADATA:
     OutputTable.push_back(IITDescriptor::get(IITDescriptor::Metadata, 0));
@@ -609,14 +632,6 @@ static void DecodeIITType(unsigned &NextElt, ArrayRef<unsigned char> Infos,
     return;
   case IIT_V64:
     OutputTable.push_back(IITDescriptor::get(IITDescriptor::Vector, 64));
-    DecodeIITType(NextElt, Infos, OutputTable);
-    return;
-  case IIT_V512:
-    OutputTable.push_back(IITDescriptor::get(IITDescriptor::Vector, 512));
-    DecodeIITType(NextElt, Infos, OutputTable);
-    return;
-  case IIT_V1024:
-    OutputTable.push_back(IITDescriptor::get(IITDescriptor::Vector, 1024));
     DecodeIITType(NextElt, Infos, OutputTable);
     return;
   case IIT_PTR:
@@ -736,7 +751,6 @@ static Type *DecodeFixedType(ArrayRef<Intrinsic::IITDescriptor> &Infos,
   case IITDescriptor::Void: return Type::getVoidTy(Context);
   case IITDescriptor::VarArg: return Type::getVoidTy(Context);
   case IITDescriptor::MMX: return Type::getX86_MMXTy(Context);
-  case IITDescriptor::Token: return Type::getTokenTy(Context);
   case IITDescriptor::Metadata: return Type::getMetadataTy(Context);
   case IITDescriptor::Half: return Type::getHalfTy(Context);
   case IITDescriptor::Float: return Type::getFloatTy(Context);
@@ -910,68 +924,62 @@ bool Function::callsFunctionThatReturnsTwice() const {
   return false;
 }
 
-Constant *Function::getPersonalityFn() const {
-  assert(hasPersonalityFn() && getNumOperands());
-  return cast<Constant>(Op<0>());
-}
-
-void Function::setPersonalityFn(Constant *Fn) {
-  setHungoffOperand<0>(Fn);
-  setValueSubclassDataBit(3, Fn != nullptr);
-}
-
 Constant *Function::getPrefixData() const {
-  assert(hasPrefixData() && getNumOperands());
-  return cast<Constant>(Op<1>());
+  assert(hasPrefixData());
+  const LLVMContextImpl::PrefixDataMapTy &PDMap =
+      getContext().pImpl->PrefixDataMap;
+  assert(PDMap.find(this) != PDMap.end());
+  return cast<Constant>(PDMap.find(this)->second->getReturnValue());
 }
 
 void Function::setPrefixData(Constant *PrefixData) {
-  setHungoffOperand<1>(PrefixData);
-  setValueSubclassDataBit(1, PrefixData != nullptr);
+  if (!PrefixData && !hasPrefixData())
+    return;
+
+  unsigned SCData = getSubclassDataFromValue();
+  LLVMContextImpl::PrefixDataMapTy &PDMap = getContext().pImpl->PrefixDataMap;
+  ReturnInst *&PDHolder = PDMap[this];
+  if (PrefixData) {
+    if (PDHolder)
+      PDHolder->setOperand(0, PrefixData);
+    else
+      PDHolder = ReturnInst::Create(getContext(), PrefixData);
+    SCData |= (1<<1);
+  } else {
+    delete PDHolder;
+    PDMap.erase(this);
+    SCData &= ~(1<<1);
+  }
+  setValueSubclassData(SCData);
 }
 
 Constant *Function::getPrologueData() const {
-  assert(hasPrologueData() && getNumOperands());
-  return cast<Constant>(Op<2>());
+  assert(hasPrologueData());
+  const LLVMContextImpl::PrologueDataMapTy &SOMap =
+      getContext().pImpl->PrologueDataMap;
+  assert(SOMap.find(this) != SOMap.end());
+  return cast<Constant>(SOMap.find(this)->second->getReturnValue());
 }
 
 void Function::setPrologueData(Constant *PrologueData) {
-  setHungoffOperand<2>(PrologueData);
-  setValueSubclassDataBit(2, PrologueData != nullptr);
-}
-
-void Function::allocHungoffUselist() {
-  // If we've already allocated a uselist, stop here.
-  if (getNumOperands())
+  if (!PrologueData && !hasPrologueData())
     return;
 
-  allocHungoffUses(3, /*IsPhi=*/ false);
-  setNumHungOffUseOperands(3);
-
-  // Initialize the uselist with placeholder operands to allow traversal.
-  auto *CPN = ConstantPointerNull::get(Type::getInt1PtrTy(getContext(), 0));
-  Op<0>().set(CPN);
-  Op<1>().set(CPN);
-  Op<2>().set(CPN);
-}
-
-template <int Idx>
-void Function::setHungoffOperand(Constant *C) {
-  if (C) {
-    allocHungoffUselist();
-    Op<Idx>().set(C);
-  } else if (getNumOperands()) {
-    Op<Idx>().set(
-        ConstantPointerNull::get(Type::getInt1PtrTy(getContext(), 0)));
+  unsigned PDData = getSubclassDataFromValue();
+  LLVMContextImpl::PrologueDataMapTy &PDMap = getContext().pImpl->PrologueDataMap;
+  ReturnInst *&PDHolder = PDMap[this];
+  if (PrologueData) {
+    if (PDHolder)
+      PDHolder->setOperand(0, PrologueData);
+    else
+      PDHolder = ReturnInst::Create(getContext(), PrologueData);
+    PDData |= (1<<2);
+  } else {
+    delete PDHolder;
+    PDMap.erase(this);
+    PDData &= ~(1<<2);
   }
-}
-
-void Function::setValueSubclassDataBit(unsigned Bit, bool On) {
-  assert(Bit < 16 && "SubclassData contains only 16 bits");
-  if (On)
-    setValueSubclassData(getSubclassDataFromValue() | (1 << Bit));
-  else
-    setValueSubclassData(getSubclassDataFromValue() & ~(1 << Bit));
+  setValueSubclassData(PDData);
 }
 
 void Function::setEntryCount(uint64_t Count) {
@@ -988,4 +996,23 @@ Optional<uint64_t> Function::getEntryCount() const {
         return CI->getValue().getZExtValue();
       }
   return None;
+}
+
+void Function::setPersonalityFn(Constant *C) {
+  if (!C) {
+    if (hasPersonalityFn()) {
+      // Note, the num operands is used to compute the offset of the operand, so
+      // the order here matters.  Clearing the operand then clearing the num
+      // operands ensures we have the correct offset to the operand.
+      Op<0>().set(nullptr);
+      setFunctionNumOperands(0);
+    }
+  } else {
+    // Note, the num operands is used to compute the offset of the operand, so
+    // the order here matters.  We need to set num operands to 1 first so that
+    // we get the correct offset to the first operand when we set it.
+    if (!hasPersonalityFn())
+      setFunctionNumOperands(1);
+    Op<0>().set(C);
+  }
 }

@@ -371,9 +371,8 @@ public:
   void releaseMemory() { reset(); }
 
   /// getNode - return the (Post)DominatorTree node for the specified basic
-  /// block.  This is the same as using operator[] on this class.  The result
-  /// may (but is not required to) be null for a forward (backwards)
-  /// statically unreachable block.
+  /// block.  This is the same as using operator[] on this class.
+  ///
   DomTreeNodeBase<NodeT> *getNode(NodeT *BB) const {
     auto I = DomTreeNodes.find(BB);
     if (I != DomTreeNodes.end())
@@ -381,7 +380,6 @@ public:
     return nullptr;
   }
 
-  /// See getNode.
   DomTreeNodeBase<NodeT> *operator[](NodeT *BB) const { return getNode(BB); }
 
   /// getRootNode - This returns the entry node for the CFG of the function.  If
@@ -724,16 +722,24 @@ public:
     if (!this->IsPostDominators) {
       // Initialize root
       NodeT *entry = TraitsTy::getEntryNode(&F);
-      addRoot(entry);
+      this->Roots.push_back(entry);
+      this->IDoms[entry] = nullptr;
+      this->DomTreeNodes[entry] = nullptr;
 
       Calculate<FT, NodeT *>(*this, F);
     } else {
       // Initialize the roots list
       for (typename TraitsTy::nodes_iterator I = TraitsTy::nodes_begin(&F),
                                              E = TraitsTy::nodes_end(&F);
-           I != E; ++I)
-        if (TraitsTy::child_begin(&*I) == TraitsTy::child_end(&*I))
-          addRoot(&*I);
+           I != E; ++I) {
+        if (TraitsTy::child_begin(I) == TraitsTy::child_end(I))
+          addRoot(I);
+
+        // Prepopulate maps so that we don't get iterator invalidation issues
+        // later.
+        this->IDoms[I] = nullptr;
+        this->DomTreeNodes[I] = nullptr;
+      }
 
       Calculate<FT, Inverse<NodeT *>>(*this, F);
     }

@@ -17,7 +17,6 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Dominators.h"
@@ -36,19 +35,18 @@ namespace {
     }
 
     // Possibly eliminate loop L if it is dead.
-    bool runOnLoop(Loop *L, LPPassManager &) override;
+    bool runOnLoop(Loop *L, LPPassManager &LPM) override;
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfoWrapperPass>();
-      AU.addRequired<ScalarEvolutionWrapperPass>();
+      AU.addRequired<ScalarEvolution>();
       AU.addRequiredID(LoopSimplifyID);
       AU.addRequiredID(LCSSAID);
 
-      AU.addPreserved<ScalarEvolutionWrapperPass>();
+      AU.addPreserved<ScalarEvolution>();
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addPreserved<LoopInfoWrapperPass>();
-      AU.addPreserved<GlobalsAAWrapperPass>();
       AU.addPreservedID(LoopSimplifyID);
       AU.addPreservedID(LCSSAID);
     }
@@ -66,7 +64,7 @@ INITIALIZE_PASS_BEGIN(LoopDeletion, "loop-deletion",
                 "Delete dead loops", false, false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 INITIALIZE_PASS_DEPENDENCY(LCSSA)
 INITIALIZE_PASS_END(LoopDeletion, "loop-deletion",
@@ -132,7 +130,7 @@ bool LoopDeletion::isLoopDead(Loop *L,
 /// so could change the halting/non-halting nature of a program.
 /// NOTE: This entire process relies pretty heavily on LoopSimplify and LCSSA
 /// in order to make various safety checks work.
-bool LoopDeletion::runOnLoop(Loop *L, LPPassManager &) {
+bool LoopDeletion::runOnLoop(Loop *L, LPPassManager &LPM) {
   if (skipOptnoneFunction(L))
     return false;
 
@@ -171,7 +169,7 @@ bool LoopDeletion::runOnLoop(Loop *L, LPPassManager &) {
 
   // Don't remove loops for which we can't solve the trip count.
   // They could be infinite, in which case we'd be changing program behavior.
-  ScalarEvolution &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  ScalarEvolution &SE = getAnalysis<ScalarEvolution>();
   const SCEV *S = SE.getMaxBackedgeTakenCount(L);
   if (isa<SCEVCouldNotCompute>(S))
     return Changed;
@@ -244,8 +242,9 @@ bool LoopDeletion::runOnLoop(Loop *L, LPPassManager &) {
   for (BasicBlock *BB : blocks)
     loopInfo.removeBlock(BB);
 
-  // The last step is to update LoopInfo now that we've eliminated this loop.
-  loopInfo.markAsRemoved(L);
+  // The last step is to inform the loop pass manager that we've
+  // eliminated this loop.
+  LPM.deleteLoopFromQueue(L);
   Changed = true;
 
   ++NumDeleted;

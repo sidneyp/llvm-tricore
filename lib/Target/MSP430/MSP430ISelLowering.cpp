@@ -69,6 +69,10 @@ MSP430TargetLowering::MSP430TargetLowering(const TargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 
   // Provide all sorts of operation actions
+
+  // Division is expensive
+  setIntDivIsCheap(false);
+
   setStackPointerRegisterToSaveRestore(MSP430::SP);
   setBooleanContents(ZeroOrOneBooleanContent);
   setBooleanVectorContents(ZeroOrOneBooleanContent); // FIXME: Is this correct?
@@ -504,10 +508,9 @@ MSP430TargetLowering::LowerCCCArguments(SDValue Chain,
         // Create the SelectionDAG nodes corresponding to a load
         //from this parameter
         SDValue FIN = DAG.getFrameIndex(FI, MVT::i16);
-        InVal = DAG.getLoad(
-            VA.getLocVT(), dl, Chain, FIN,
-            MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI),
-            false, false, false, 0);
+        InVal = DAG.getLoad(VA.getLocVT(), dl, Chain, FIN,
+                            MachinePointerInfo::getFixedStack(FI),
+                            false, false, false, 0);
       }
 
       InVals.push_back(InVal);
@@ -1228,7 +1231,8 @@ MSP430TargetLowering::EmitShiftInstr(MachineInstr *MI,
   }
 
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction::iterator I = ++BB->getIterator();
+  MachineFunction::iterator I = BB;
+  ++I;
 
   // Create loop block
   MachineBasicBlock *LoopBB = F->CreateMachineBasicBlock(LLVM_BB);
@@ -1316,7 +1320,8 @@ MSP430TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   // to set, the condition code register to branch on, the true/false values to
   // select between, and a branch opcode to use.
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction::iterator I = ++BB->getIterator();
+  MachineFunction::iterator I = BB;
+  ++I;
 
   //  thisMBB:
   //  ...

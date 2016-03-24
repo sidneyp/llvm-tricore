@@ -73,6 +73,7 @@ void ARMException::endFunction(const MachineFunction *MF) {
   const Function *Per = nullptr;
   if (F->hasPersonalityFn())
     Per = dyn_cast<Function>(F->getPersonalityFn()->stripPointerCasts());
+  assert(!MMI->getPersonality() || Per == MMI->getPersonality());
   bool forceEmitPersonality =
     F->hasPersonalityFn() && !isNoOpWithoutInvoke(classifyEHPersonality(Per)) &&
     F->needsUnwindTableEntry();
@@ -114,7 +115,9 @@ void ARMException::emitTypeInfos(unsigned TTypeEncoding) {
     Entry = TypeInfos.size();
   }
 
-  for (const GlobalValue *GV : reverse(TypeInfos)) {
+  for (std::vector<const GlobalValue *>::const_reverse_iterator
+         I = TypeInfos.rbegin(), E = TypeInfos.rend(); I != E; ++I) {
+    const GlobalValue *GV = *I;
     if (VerboseAsm)
       Asm->OutStreamer->AddComment("TypeInfo " + Twine(Entry--));
     Asm->EmitTTypeReference(GV, TTypeEncoding);

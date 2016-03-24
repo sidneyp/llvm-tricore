@@ -54,7 +54,6 @@ namespace llvm {
     typedef std::vector<MergePotentialsElt>::iterator MPIterator;
     std::vector<MergePotentialsElt> MergePotentials;
     SmallPtrSet<const MachineBasicBlock*, 2> TriedMerging;
-    DenseMap<const MachineBasicBlock *, int> FuncletMembership;
 
     class SameTailElt {
       MPIterator MPIter;

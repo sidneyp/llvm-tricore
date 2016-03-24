@@ -17,13 +17,13 @@ using namespace llvm;
 namespace {
 
 TEST(StringTableBuilderTest, BasicELF) {
-  StringTableBuilder B(StringTableBuilder::ELF);
+  StringTableBuilder B;
 
   B.add("foo");
   B.add("bar");
   B.add("foobar");
 
-  B.finalize();
+  B.finalize(StringTableBuilder::ELF);
 
   std::string Expected;
   Expected += '\x00';
@@ -39,14 +39,14 @@ TEST(StringTableBuilderTest, BasicELF) {
 }
 
 TEST(StringTableBuilderTest, BasicWinCOFF) {
-  StringTableBuilder B(StringTableBuilder::WinCOFF);
+  StringTableBuilder B;
 
   // Strings must be 9 chars or longer to go in the table.
   B.add("hippopotamus");
   B.add("pygmy hippopotamus");
   B.add("river horse");
 
-  B.finalize();
+  B.finalize(StringTableBuilder::WinCOFF);
 
   // size_field + "pygmy hippopotamus\0" + "river horse\0"
   uint32_t ExpectedSize = 4 + 19 + 12;

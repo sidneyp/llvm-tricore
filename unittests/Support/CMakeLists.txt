@@ -32,7 +32,6 @@ add_llvm_unittest(SupportTests
   ProcessTest.cpp
   ProgramTest.cpp
   RegexTest.cpp
-  ReplaceFileTest.cpp
   ScaledNumberTest.cpp
   SourceMgrTest.cpp
   SpecialCaseListTest.cpp
@@ -41,10 +40,7 @@ add_llvm_unittest(SupportTests
   SwapByteOrderTest.cpp
   TargetRegistry.cpp
   ThreadLocalTest.cpp
-  ThreadPool.cpp
-  TimerTest.cpp
   TimeValueTest.cpp
-  TrailingObjectsTest.cpp
   UnicodeTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp

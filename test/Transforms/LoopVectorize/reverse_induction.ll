@@ -96,7 +96,8 @@ loopend:
 ; CHECK-LABEL: @reverse_forward_induction_i64_i8(
 ; CHECK: vector.body
 ; CHECK: %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
-; CHECK: %offset.idx = sub i64 1023, %index
+; CHECK: %normalized.idx = sub i64 %index, 0
+; CHECK: %offset.idx = sub i64 1023, %normalized.idx
 ; CHECK: trunc i64 %index to i8
 
 define void @reverse_forward_induction_i64_i8() {
@@ -121,8 +122,10 @@ while.end:
 
 ; CHECK-LABEL: @reverse_forward_induction_i64_i8_signed(
 ; CHECK: vector.body:
-; CHECK:  %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
-; CHECK:  %offset.idx = sub i64 1023, %index
+; CHECK:  %index = phi i64 [ 129, %vector.ph ], [ %index.next, %vector.body ]
+; CHECK:  %normalized.idx = sub i64 %index, 129
+; CHECK:  %offset.idx = sub i64 1023, %normalized.idx
+; CHECK:  trunc i64 %index to i8
 
 define void @reverse_forward_induction_i64_i8_signed() {
 entry:

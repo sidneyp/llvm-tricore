@@ -17,7 +17,6 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
@@ -168,7 +167,8 @@ bool AliasSet::aliasesPointer(const Value *Ptr, uint64_t Size,
   if (!UnknownInsts.empty()) {
     for (unsigned i = 0, e = UnknownInsts.size(); i != e; ++i)
       if (AA.getModRefInfo(UnknownInsts[i],
-                           MemoryLocation(Ptr, Size, AAInfo)) != MRI_NoModRef)
+                           MemoryLocation(Ptr, Size, AAInfo)) !=
+          AliasAnalysis::NoModRef)
         return true;
   }
 
@@ -182,14 +182,16 @@ bool AliasSet::aliasesUnknownInst(const Instruction *Inst,
 
   for (unsigned i = 0, e = UnknownInsts.size(); i != e; ++i) {
     ImmutableCallSite C1(getUnknownInst(i)), C2(Inst);
-    if (!C1 || !C2 || AA.getModRefInfo(C1, C2) != MRI_NoModRef ||
-        AA.getModRefInfo(C2, C1) != MRI_NoModRef)
+    if (!C1 || !C2 ||
+        AA.getModRefInfo(C1, C2) != AliasAnalysis::NoModRef ||
+        AA.getModRefInfo(C2, C1) != AliasAnalysis::NoModRef)
       return true;
   }
 
   for (iterator I = begin(), E = end(); I != E; ++I)
-    if (AA.getModRefInfo(Inst, MemoryLocation(I.getPointer(), I.getSize(),
-                                              I.getAAInfo())) != MRI_NoModRef)
+    if (AA.getModRefInfo(
+            Inst, MemoryLocation(I.getPointer(), I.getSize(), I.getAAInfo())) !=
+        AliasAnalysis::NoModRef)
       return true;
 
   return false;
@@ -221,7 +223,7 @@ AliasSet *AliasSetTracker::findAliasSetForPointer(const Value *Ptr,
     if (Cur->Forward || !Cur->aliasesPointer(Ptr, Size, AAInfo, AA)) continue;
     
     if (!FoundSet) {      // If this is the first alias set ptr can go into.
-      FoundSet = &*Cur;   // Remember it.
+      FoundSet = Cur;     // Remember it.
     } else {              // Otherwise, we must merge the sets.
       FoundSet->mergeSetIn(*Cur, *this);     // Merge in contents.
     }
@@ -255,7 +257,7 @@ AliasSet *AliasSetTracker::findAliasSetForUnknownInst(Instruction *Inst) {
     if (Cur->Forward || !Cur->aliasesUnknownInst(Inst, AA))
       continue;
     if (!FoundSet)            // If this is the first alias set ptr can go into.
-      FoundSet = &*Cur;       // Remember it.
+      FoundSet = Cur;         // Remember it.
     else if (!Cur->Forward)   // Otherwise, we must merge the sets.
       FoundSet->mergeSetIn(*Cur, *this);     // Merge in contents.
   }
@@ -307,9 +309,8 @@ bool AliasSetTracker::add(LoadInst *LI) {
 
   AliasSet::AccessLattice Access = AliasSet::RefAccess;
   bool NewPtr;
-  const DataLayout &DL = LI->getModule()->getDataLayout();
   AliasSet &AS = addPointer(LI->getOperand(0),
-                            DL.getTypeStoreSize(LI->getType()),
+                            AA.getTypeStoreSize(LI->getType()),
                             AAInfo, Access, NewPtr);
   if (LI->isVolatile()) AS.setVolatile();
   return NewPtr;
@@ -323,10 +324,9 @@ bool AliasSetTracker::add(StoreInst *SI) {
 
   AliasSet::AccessLattice Access = AliasSet::ModAccess;
   bool NewPtr;
-  const DataLayout &DL = SI->getModule()->getDataLayout();
   Value *Val = SI->getOperand(0);
   AliasSet &AS = addPointer(SI->getOperand(1),
-                            DL.getTypeStoreSize(Val->getType()),
+                            AA.getTypeStoreSize(Val->getType()),
                             AAInfo, Access, NewPtr);
   if (SI->isVolatile()) AS.setVolatile();
   return NewPtr;
@@ -372,8 +372,8 @@ bool AliasSetTracker::add(Instruction *I) {
 }
 
 void AliasSetTracker::add(BasicBlock &BB) {
-  for (auto &I : BB)
-    add(&I);
+  for (BasicBlock::iterator I = BB.begin(), E = BB.end(); I != E; ++I)
+    add(I);
 }
 
 void AliasSetTracker::add(const AliasSetTracker &AST) {
@@ -443,8 +443,7 @@ AliasSetTracker::remove(Value *Ptr, uint64_t Size, const AAMDNodes &AAInfo) {
 }
 
 bool AliasSetTracker::remove(LoadInst *LI) {
-  const DataLayout &DL = LI->getModule()->getDataLayout();
-  uint64_t Size = DL.getTypeStoreSize(LI->getType());
+  uint64_t Size = AA.getTypeStoreSize(LI->getType());
 
   AAMDNodes AAInfo;
   LI->getAAMetadata(AAInfo);
@@ -456,8 +455,7 @@ bool AliasSetTracker::remove(LoadInst *LI) {
 }
 
 bool AliasSetTracker::remove(StoreInst *SI) {
-  const DataLayout &DL = SI->getModule()->getDataLayout();
-  uint64_t Size = DL.getTypeStoreSize(SI->getOperand(0)->getType());
+  uint64_t Size = AA.getTypeStoreSize(SI->getOperand(0)->getType());
 
   AAMDNodes AAInfo;
   SI->getAAMetadata(AAInfo);
@@ -507,6 +505,9 @@ bool AliasSetTracker::remove(Instruction *I) {
 // dangling pointers to deleted instructions.
 //
 void AliasSetTracker::deleteValue(Value *PtrVal) {
+  // Notify the alias analysis implementation that this value is gone.
+  AA.deleteValue(PtrVal);
+
   // If this is a call instruction, remove the callsite from the appropriate
   // AliasSet (if present).
   if (Instruction *Inst = dyn_cast<Instruction>(PtrVal)) {
@@ -649,12 +650,11 @@ namespace {
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
-      AU.addRequired<AAResultsWrapperPass>();
+      AU.addRequired<AliasAnalysis>();
     }
 
     bool runOnFunction(Function &F) override {
-      auto &AAWP = getAnalysis<AAResultsWrapperPass>();
-      Tracker = new AliasSetTracker(AAWP.getAAResults());
+      Tracker = new AliasSetTracker(getAnalysis<AliasAnalysis>());
 
       for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
         Tracker->add(&*I);
@@ -668,6 +668,6 @@ namespace {
 char AliasSetPrinter::ID = 0;
 INITIALIZE_PASS_BEGIN(AliasSetPrinter, "print-alias-sets",
                 "Alias Set Printer", false, true)
-INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_END(AliasSetPrinter, "print-alias-sets",
                 "Alias Set Printer", false, true)

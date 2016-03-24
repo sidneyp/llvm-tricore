@@ -81,7 +81,7 @@ bool GenericToNVVM::runOnModule(Module &M) {
 
   for (Module::global_iterator I = M.global_begin(), E = M.global_end();
        I != E;) {
-    GlobalVariable *GV = &*I++;
+    GlobalVariable *GV = I++;
     if (GV->getType()->getAddressSpace() == llvm::ADDRESS_SPACE_GENERIC &&
         !llvm::isTexture(*GV) && !llvm::isSurface(*GV) &&
         !llvm::isSampler(*GV) && !GV->getName().startswith("llvm.")) {
@@ -117,7 +117,7 @@ bool GenericToNVVM::runOnModule(Module &M) {
           Value *Operand = II->getOperand(i);
           if (isa<Constant>(Operand)) {
             II->setOperand(
-                i, remapConstant(&M, &*I, cast<Constant>(Operand), Builder));
+                i, remapConstant(&M, I, cast<Constant>(Operand), Builder));
           }
         }
       }
@@ -132,8 +132,10 @@ bool GenericToNVVM::runOnModule(Module &M) {
 
   // Walk through the metadata section and update the debug information
   // associated with the global variables in the default address space.
-  for (NamedMDNode &I : M.named_metadata()) {
-    remapNamedMDNode(VM, &I);
+  for (Module::named_metadata_iterator I = M.named_metadata_begin(),
+                                       E = M.named_metadata_end();
+       I != E; I++) {
+    remapNamedMDNode(VM, I);
   }
 
   // Walk through the global variable  initializers, and replace any use of
@@ -316,8 +318,9 @@ Value *GenericToNVVM::remapConstantExpr(Module *M, Function *F, ConstantExpr *C,
                               NewOperands[0], NewOperands[1]);
   case Instruction::FCmp:
     // CompareConstantExpr (fcmp)
-    llvm_unreachable("Address space conversion should have no effect "
-                     "on float point CompareConstantExpr (fcmp)!");
+    assert(false && "Address space conversion should have no effect "
+                    "on float point CompareConstantExpr (fcmp)!");
+    return C;
   case Instruction::ExtractElement:
     // ExtractElementConstantExpr
     return Builder.CreateExtractElement(NewOperands[0], NewOperands[1]);
@@ -361,7 +364,8 @@ Value *GenericToNVVM::remapConstantExpr(Module *M, Function *F, ConstantExpr *C,
       return Builder.CreateCast(Instruction::CastOps(C->getOpcode()),
                                 NewOperands[0], C->getType());
     }
-    llvm_unreachable("GenericToNVVM encountered an unsupported ConstantExpr");
+    assert(false && "GenericToNVVM encountered an unsupported ConstantExpr");
+    return C;
   }
 }
 

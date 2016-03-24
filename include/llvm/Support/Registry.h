@@ -37,6 +37,7 @@ namespace llvm {
     std::unique_ptr<T> instantiate() const { return Ctor(); }
   };
 
+
   /// Traits for registry entries. If using other than SimpleRegistryEntry, it
   /// is necessary to define an alternate traits class.
   template <typename T>
@@ -51,6 +52,7 @@ namespace llvm {
     static const char *nameof(const entry &Entry) { return Entry.getName(); }
     static const char *descof(const entry &Entry) { return Entry.getDesc(); }
   };
+
 
   /// A global registry used in conjunction with static constructors to make
   /// pluggable components (like targets or garbage collectors) "just work" when
@@ -100,6 +102,7 @@ namespace llvm {
       }
     };
 
+
     /// Iterators for registry entries.
     ///
     class iterator {
@@ -119,8 +122,9 @@ namespace llvm {
     static iterator end()   { return iterator(nullptr); }
 
     static iterator_range<iterator> entries() {
-      return make_range(begin(), end());
+      return iterator_range<iterator>(begin(), end());
     }
+
 
     /// Abstract base class for registry listeners, which are informed when new
     /// entries are added to the registry. Simply subclass and instantiate:
@@ -156,7 +160,7 @@ namespace llvm {
       }
 
     public:
-      listener() : Prev(ListenerTail), Next(nullptr) {
+      listener() : Prev(ListenerTail), Next(0) {
         if (Prev)
           Prev->Next = this;
         else
@@ -175,6 +179,7 @@ namespace llvm {
           ListenerHead = Next;
       }
     };
+
 
     /// A static registration template. Use like such:
     ///
@@ -205,6 +210,7 @@ namespace llvm {
     };
 
     /// Registry::Parser now lives in llvm/Support/RegistryParser.h.
+
   };
 
   // Since these are defined in a header file, plugins must be sure to export
@@ -222,6 +228,6 @@ namespace llvm {
   template <typename T, typename U>
   typename Registry<T,U>::listener *Registry<T,U>::ListenerTail;
 
-} // end namespace llvm
+}
 
-#endif // LLVM_SUPPORT_REGISTRY_H
+#endif

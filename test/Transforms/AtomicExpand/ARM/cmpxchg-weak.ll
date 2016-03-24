@@ -9,20 +9,16 @@ define i32 @test_cmpxchg_seq_cst(i32* %addr, i32 %desired, i32 %new) {
 ; CHECK: [[START]]:
 ; CHECK:     [[LOADED:%.*]] = call i32 @llvm.arm.ldrex.p0i32(i32* %addr)
 ; CHECK:     [[SHOULD_STORE:%.*]] = icmp eq i32 [[LOADED]], %desired
-; CHECK:     br i1 [[SHOULD_STORE]], label %[[TRY_STORE:.*]], label %[[NO_STORE_BB:.*]]
+; CHECK:     br i1 [[SHOULD_STORE]], label %[[TRY_STORE:.*]], label %[[FAILURE_BB:.*]]
 
 ; CHECK: [[TRY_STORE]]:
 ; CHECK:     [[STREX:%.*]] = call i32 @llvm.arm.strex.p0i32(i32 %new, i32* %addr)
 ; CHECK:     [[SUCCESS:%.*]] = icmp eq i32 [[STREX]], 0
-; CHECK:     br i1 [[SUCCESS]], label %[[SUCCESS_BB:.*]], label %[[FAILURE_BB:.*]]
+; CHECK:     br i1 [[SUCCESS]], label %[[SUCCESS_BB:.*]], label %[[FAILURE_BB]]
 
 ; CHECK: [[SUCCESS_BB]]:
 ; CHECK:     call void @llvm.arm.dmb(i32 11)
 ; CHECK:     br label %[[END:.*]]
-
-; CHECK: [[NO_STORE_BB]]:
-; CHECK:     call void @llvm.arm.clrex()
-; CHECK:     br label %[[FAILURE_BB]]
 
 ; CHECK: [[FAILURE_BB]]:
 ; CHECK:     call void @llvm.arm.dmb(i32 11)
@@ -45,7 +41,7 @@ define i1 @test_cmpxchg_weak_fail(i32* %addr, i32 %desired, i32 %new) {
 ; CHECK: [[START]]:
 ; CHECK:     [[LOADED:%.*]] = call i32 @llvm.arm.ldrex.p0i32(i32* %addr)
 ; CHECK:     [[SHOULD_STORE:%.*]] = icmp eq i32 [[LOADED]], %desired
-; CHECK:     br i1 [[SHOULD_STORE]], label %[[TRY_STORE:.*]], label %[[NO_STORE_BB:.*]]
+; CHECK:     br i1 [[SHOULD_STORE]], label %[[TRY_STORE:.*]], label %[[FAILURE_BB:.*]]
 
 ; CHECK: [[TRY_STORE]]:
 ; CHECK:     [[STREX:%.*]] = call i32 @llvm.arm.strex.p0i32(i32 %new, i32* %addr)
@@ -55,10 +51,6 @@ define i1 @test_cmpxchg_weak_fail(i32* %addr, i32 %desired, i32 %new) {
 ; CHECK: [[SUCCESS_BB]]:
 ; CHECK:     call void @llvm.arm.dmb(i32 11)
 ; CHECK:     br label %[[END:.*]]
-
-; CHECK: [[NO_STORE_BB]]:
-; CHECK:     call void @llvm.arm.clrex()
-; CHECK:     br label %[[FAILURE_BB]]
 
 ; CHECK: [[FAILURE_BB]]:
 ; CHECK-NOT: dmb
@@ -81,7 +73,7 @@ define i32 @test_cmpxchg_monotonic(i32* %addr, i32 %desired, i32 %new) {
 ; CHECK: [[START]]:
 ; CHECK:     [[LOADED:%.*]] = call i32 @llvm.arm.ldrex.p0i32(i32* %addr)
 ; CHECK:     [[SHOULD_STORE:%.*]] = icmp eq i32 [[LOADED]], %desired
-; CHECK:     br i1 [[SHOULD_STORE]], label %[[TRY_STORE:.*]], label %[[NO_STORE_BB:.*]]
+; CHECK:     br i1 [[SHOULD_STORE]], label %[[TRY_STORE:.*]], label %[[FAILURE_BB:.*]]
 
 ; CHECK: [[TRY_STORE]]:
 ; CHECK:     [[STREX:%.*]] = call i32 @llvm.arm.strex.p0i32(i32 %new, i32* %addr)
@@ -91,10 +83,6 @@ define i32 @test_cmpxchg_monotonic(i32* %addr, i32 %desired, i32 %new) {
 ; CHECK: [[SUCCESS_BB]]:
 ; CHECK-NOT: dmb
 ; CHECK:     br label %[[END:.*]]
-
-; CHECK: [[NO_STORE_BB]]:
-; CHECK:     call void @llvm.arm.clrex()
-; CHECK:     br label %[[FAILURE_BB]]
 
 ; CHECK: [[FAILURE_BB]]:
 ; CHECK-NOT: dmb

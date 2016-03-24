@@ -29,7 +29,6 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdlib>
-
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -38,9 +37,9 @@ using namespace llvm;
 
 // Explicit instantiations of SymbolTableListTraits since some of the methods
 // are not in the public header file.
-template class llvm::SymbolTableListTraits<Function>;
-template class llvm::SymbolTableListTraits<GlobalVariable>;
-template class llvm::SymbolTableListTraits<GlobalAlias>;
+template class llvm::SymbolTableListTraits<Function, Module>;
+template class llvm::SymbolTableListTraits<GlobalVariable, Module>;
+template class llvm::SymbolTableListTraits<GlobalAlias, Module>;
 
 //===----------------------------------------------------------------------===//
 // Primitive Module methods.
@@ -82,6 +81,7 @@ RandomNumberGenerator *Module::createRNG(const Pass* P) const {
   return new RandomNumberGenerator(Salt);
 }
 
+
 /// getNamedValue - Return the first global value in the module with
 /// the specified name, of arbitrary type.  This method returns null
 /// if a global with the specified name is not found.
@@ -102,9 +102,6 @@ void Module::getMDKindNames(SmallVectorImpl<StringRef> &Result) const {
   return Context.getMDKindNames(Result);
 }
 
-void Module::getOperandBundleTags(SmallVectorImpl<StringRef> &Result) const {
-  return Context.getOperandBundleTags(Result);
-}
 
 //===----------------------------------------------------------------------===//
 // Methods for easy access to the functions in the module.
@@ -277,7 +274,7 @@ NamedMDNode *Module::getOrInsertNamedMetadata(StringRef Name) {
 /// delete it.
 void Module::eraseNamedMetadata(NamedMDNode *NMD) {
   static_cast<StringMap<NamedMDNode *> *>(NamedMDSymTab)->erase(NMD->getName());
-  NamedMDList.erase(NMD->getIterator());
+  NamedMDList.erase(NMD);
 }
 
 bool Module::isValidModFlagBehavior(Metadata *MD, ModFlagBehavior &MFB) {
@@ -379,9 +376,15 @@ const DataLayout &Module::getDataLayout() const { return DL; }
 //
 void Module::setMaterializer(GVMaterializer *GVM) {
   assert(!Materializer &&
-         "Module already has a GVMaterializer.  Call materializeAll"
+         "Module already has a GVMaterializer.  Call MaterializeAllPermanently"
          " to clear it out before setting another one.");
   Materializer.reset(GVM);
+}
+
+bool Module::isDematerializable(const GlobalValue *GV) const {
+  if (Materializer)
+    return Materializer->isDematerializable(GV);
+  return false;
 }
 
 std::error_code Module::materialize(GlobalValue *GV) {
@@ -391,11 +394,23 @@ std::error_code Module::materialize(GlobalValue *GV) {
   return Materializer->materialize(GV);
 }
 
+void Module::dematerialize(GlobalValue *GV) {
+  if (Materializer)
+    return Materializer->dematerialize(GV);
+}
+
 std::error_code Module::materializeAll() {
   if (!Materializer)
     return std::error_code();
-  std::unique_ptr<GVMaterializer> M = std::move(Materializer);
-  return M->materializeModule();
+  return Materializer->materializeModule(this);
+}
+
+std::error_code Module::materializeAllPermanently() {
+  if (std::error_code EC = materializeAll())
+    return EC;
+
+  Materializer.reset();
+  return std::error_code();
 }
 
 std::error_code Module::materializeMetadata() {
@@ -443,14 +458,7 @@ void Module::dropAllReferences() {
 unsigned Module::getDwarfVersion() const {
   auto *Val = cast_or_null<ConstantAsMetadata>(getModuleFlag("Dwarf Version"));
   if (!Val)
-    return 0;
-  return cast<ConstantInt>(Val->getValue())->getZExtValue();
-}
-
-unsigned Module::getCodeViewFlag() const {
-  auto *Val = cast_or_null<ConstantAsMetadata>(getModuleFlag("CodeView"));
-  if (!Val)
-    return 0;
+    return dwarf::DWARF_VERSION;
   return cast<ConstantInt>(Val->getValue())->getZExtValue();
 }
 
@@ -463,7 +471,7 @@ Comdat *Module::getOrInsertComdat(StringRef Name) {
 PICLevel::Level Module::getPICLevel() const {
   auto *Val = cast_or_null<ConstantAsMetadata>(getModuleFlag("PIC Level"));
 
-  if (!Val)
+  if (Val == NULL)
     return PICLevel::Default;
 
   return static_cast<PICLevel::Level>(
@@ -472,16 +480,4 @@ PICLevel::Level Module::getPICLevel() const {
 
 void Module::setPICLevel(PICLevel::Level PL) {
   addModuleFlag(ModFlagBehavior::Error, "PIC Level", PL);
-}
-
-void Module::setMaximumFunctionCount(uint64_t Count) {
-  addModuleFlag(ModFlagBehavior::Error, "MaxFunctionCount", Count);
-}
-
-Optional<uint64_t> Module::getMaximumFunctionCount() {
-  auto *Val =
-      cast_or_null<ConstantAsMetadata>(getModuleFlag("MaxFunctionCount"));
-  if (!Val)
-    return None;
-  return cast<ConstantInt>(Val->getValue())->getZExtValue();
 }

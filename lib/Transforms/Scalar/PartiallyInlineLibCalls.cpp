@@ -154,7 +154,7 @@ bool PartiallyInlineLibCalls::optimizeSQRT(CallInst *Call,
   Phi->addIncoming(Call, &CurrBB);
   Phi->addIncoming(LibCall, LibCallBB);
 
-  BB = JoinBB->getIterator();
+  BB = JoinBB;
   return true;
 }
 

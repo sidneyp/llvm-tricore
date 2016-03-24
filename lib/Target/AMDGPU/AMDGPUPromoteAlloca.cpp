@@ -54,7 +54,7 @@ bool AMDGPUPromoteAlloca::doInitialization(Module &M) {
 
 bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
 
-  FunctionType *FTy = F.getFunctionType();
+  const FunctionType *FTy = F.getFunctionType();
 
   LocalMemAvailable = ST.getLocalMemorySize();
 
@@ -63,7 +63,7 @@ bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
   // possible these arguments require the entire local memory space, so
   // we cannot use local memory in the pass.
   for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i) {
-    Type *ParamTy = FTy->getParamType(i);
+    const Type *ParamTy = FTy->getParamType(i);
     if (ParamTy->isPointerTy() &&
         ParamTy->getPointerAddressSpace() == AMDGPUAS::LOCAL_ADDRESS) {
       LocalMemAvailable = 0;
@@ -77,7 +77,7 @@ bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
     // Check how much local memory is being used by global objects
     for (Module::global_iterator I = Mod->global_begin(),
                                  E = Mod->global_end(); I != E; ++I) {
-      GlobalVariable *GV = &*I;
+      GlobalVariable *GV = I;
       PointerType *GVTy = GV->getType();
       if (GVTy->getAddressSpace() != AMDGPUAS::LOCAL_ADDRESS)
         continue;
@@ -101,7 +101,7 @@ bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
   return false;
 }
 
-static VectorType *arrayTypeToVecType(Type *ArrayTy) {
+static VectorType *arrayTypeToVecType(const Type *ArrayTy) {
   return VectorType::get(ArrayTy->getArrayElementType(),
                          ArrayTy->getArrayNumElements());
 }
@@ -276,9 +276,6 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
 }
 
 void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
-  if (!I.isStaticAlloca())
-    return;
-
   IRBuilder<> Builder(&I);
 
   // First try to replace the alloca with a vector

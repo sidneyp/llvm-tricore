@@ -20,9 +20,8 @@ namespace dsymutil {
 
 using namespace llvm::object;
 
-DebugMapObject::DebugMapObject(StringRef ObjectFilename,
-                               sys::TimeValue Timestamp)
-    : Filename(ObjectFilename), Timestamp(Timestamp) {}
+DebugMapObject::DebugMapObject(StringRef ObjectFilename)
+    : Filename(ObjectFilename) {}
 
 bool DebugMapObject::addSymbol(StringRef Name, uint64_t ObjectAddress,
                                uint64_t LinkedAddress, uint32_t Size) {
@@ -59,9 +58,8 @@ void DebugMapObject::print(raw_ostream &OS) const {
 void DebugMapObject::dump() const { print(errs()); }
 #endif
 
-DebugMapObject &DebugMap::addDebugMapObject(StringRef ObjectFilePath,
-                                            sys::TimeValue Timestamp) {
-  Objects.emplace_back(new DebugMapObject(ObjectFilePath, Timestamp));
+DebugMapObject &DebugMap::addDebugMapObject(StringRef ObjectFilePath) {
+  Objects.emplace_back(new DebugMapObject(ObjectFilePath));
   return *Objects.back();
 }
 
@@ -97,7 +95,7 @@ struct YAMLContext {
 };
 }
 
-ErrorOr<std::vector<std::unique_ptr<DebugMap>>>
+ErrorOr<std::unique_ptr<DebugMap>>
 DebugMap::parseYAMLDebugMap(StringRef InputFile, StringRef PrependPath,
                             bool Verbose) {
   auto ErrOrFile = MemoryBuffer::getFileOrSTDIN(InputFile);
@@ -114,9 +112,8 @@ DebugMap::parseYAMLDebugMap(StringRef InputFile, StringRef PrependPath,
 
   if (auto EC = yin.error())
     return EC;
-  std::vector<std::unique_ptr<DebugMap>> Result;
-  Result.push_back(std::move(Res));
-  return std::move(Result);
+
+  return std::move(Res);
 }
 }
 
@@ -124,12 +121,11 @@ namespace yaml {
 
 // Normalize/Denormalize between YAML and a DebugMapObject.
 struct MappingTraits<dsymutil::DebugMapObject>::YamlDMO {
-  YamlDMO(IO &io) { Timestamp = 0; }
+  YamlDMO(IO &io) {}
   YamlDMO(IO &io, dsymutil::DebugMapObject &Obj);
   dsymutil::DebugMapObject denormalize(IO &IO);
 
   std::string Filename;
-  sys::TimeValue::SecondsType Timestamp;
   std::vector<dsymutil::DebugMapObject::YAMLSymbolMapping> Entries;
 };
 
@@ -145,7 +141,6 @@ void MappingTraits<dsymutil::DebugMapObject>::mapping(
     IO &io, dsymutil::DebugMapObject &DMO) {
   MappingNormalization<YamlDMO, dsymutil::DebugMapObject> Norm(io, DMO);
   io.mapRequired("filename", Norm->Filename);
-  io.mapOptional("timestamp", Norm->Timestamp);
   io.mapRequired("symbols", Norm->Entries);
 }
 
@@ -179,10 +174,9 @@ SequenceTraits<std::vector<std::unique_ptr<dsymutil::DebugMapObject>>>::element(
 void MappingTraits<dsymutil::DebugMap>::mapping(IO &io,
                                                 dsymutil::DebugMap &DM) {
   io.mapRequired("triple", DM.BinaryTriple);
-  io.mapOptional("binary-path", DM.BinaryPath);
+  io.mapOptional("objects", DM.Objects);
   if (void *Ctxt = io.getContext())
     reinterpret_cast<YAMLContext *>(Ctxt)->BinaryTriple = DM.BinaryTriple;
-  io.mapOptional("objects", DM.Objects);
 }
 
 void MappingTraits<std::unique_ptr<dsymutil::DebugMap>>::mapping(
@@ -190,16 +184,14 @@ void MappingTraits<std::unique_ptr<dsymutil::DebugMap>>::mapping(
   if (!DM)
     DM.reset(new DebugMap());
   io.mapRequired("triple", DM->BinaryTriple);
-  io.mapOptional("binary-path", DM->BinaryPath);
+  io.mapOptional("objects", DM->Objects);
   if (void *Ctxt = io.getContext())
     reinterpret_cast<YAMLContext *>(Ctxt)->BinaryTriple = DM->BinaryTriple;
-  io.mapOptional("objects", DM->Objects);
 }
 
 MappingTraits<dsymutil::DebugMapObject>::YamlDMO::YamlDMO(
     IO &io, dsymutil::DebugMapObject &Obj) {
   Filename = Obj.Filename;
-  Timestamp = Obj.getTimestamp().toEpochTime();
   Entries.reserve(Obj.Symbols.size());
   for (auto &Entry : Obj.Symbols)
     Entries.push_back(std::make_pair(Entry.getKey(), Entry.getValue()));
@@ -213,11 +205,11 @@ MappingTraits<dsymutil::DebugMapObject>::YamlDMO::denormalize(IO &IO) {
   StringMap<uint64_t> SymbolAddresses;
 
   sys::path::append(Path, Filename);
-  auto ErrOrObjectFiles = BinHolder.GetObjectFiles(Path);
-  if (auto EC = ErrOrObjectFiles.getError()) {
+  auto ErrOrObjectFile = BinHolder.GetObjectFile(Path);
+  if (auto EC = ErrOrObjectFile.getError()) {
     llvm::errs() << "warning: Unable to open " << Path << " " << EC.message()
                  << '\n';
-  } else if (auto ErrOrObjectFile = BinHolder.Get(Ctxt.BinaryTriple)) {
+  } else {
     // Rewrite the object file symbol addresses in the debug map. The
     // YAML input is mainly used to test llvm-dsymutil without
     // requiring binaries checked-in. If we generate the object files
@@ -232,9 +224,7 @@ MappingTraits<dsymutil::DebugMapObject>::YamlDMO::denormalize(IO &IO) {
     }
   }
 
-  sys::TimeValue TV;
-  TV.fromEpochTime(Timestamp);
-  dsymutil::DebugMapObject Res(Path, TV);
+  dsymutil::DebugMapObject Res(Path);
   for (auto &Entry : Entries) {
     auto &Mapping = Entry.second;
     uint64_t ObjAddress = Mapping.ObjectAddress;

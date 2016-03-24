@@ -16,11 +16,9 @@
 #define LLVM_TRANSFORMS_IPO_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/StringRef.h"
 
 namespace llvm {
 
-class FunctionInfoIndex;
 class ModulePass;
 class Pass;
 class Function;
@@ -85,10 +83,6 @@ ModulePass *createEliminateAvailableExternallyPass();
 ///
 ModulePass *createGVExtractionPass(std::vector<GlobalValue*>& GVs, bool
                                    deleteFn = false);
-
-//===----------------------------------------------------------------------===//
-/// This pass performs iterative function importing from other modules.
-Pass *createFunctionImportPass(const FunctionInfoIndex *Index = nullptr);
 
 //===----------------------------------------------------------------------===//
 /// createFunctionInliningPass - Return a new pass object that uses a heuristic
@@ -183,20 +177,12 @@ ModulePass *createBlockExtractorPass();
 ModulePass *createStripDeadPrototypesPass();
 
 //===----------------------------------------------------------------------===//
-/// createPostOrderFunctionAttrsPass - This pass walks SCCs of the call graph
-/// in post-order to deduce and propagate function attributes. It can discover
-/// functions that do not access memory, or only read memory, and give them the
-/// readnone/readonly attribute. It also discovers function arguments that are
-/// not captured by the function and marks them with the nocapture attribute.
+/// createFunctionAttrsPass - This pass discovers functions that do not access
+/// memory, or only read memory, and gives them the readnone/readonly attribute.
+/// It also discovers function arguments that are not captured by the function
+/// and marks them with the nocapture attribute.
 ///
-Pass *createPostOrderFunctionAttrsPass();
-
-//===----------------------------------------------------------------------===//
-/// createReversePostOrderFunctionAttrsPass - This pass walks SCCs of the call
-/// graph in RPO to deduce and propagate function attributes. Currently it
-/// only handles synthesizing norecurse attributes.
-///
-Pass *createReversePostOrderFunctionAttrsPass();
+Pass *createFunctionAttrsPass();
 
 //===----------------------------------------------------------------------===//
 /// createMergeFunctionsPass - This pass discovers identical functions and
@@ -222,15 +208,6 @@ ModulePass *createBarrierNoopPass();
 /// \brief This pass lowers bitset metadata and the llvm.bitset.test intrinsic
 /// to bitsets.
 ModulePass *createLowerBitSetsPass();
-
-/// \brief This pass export CFI checks for use by external modules.
-ModulePass *createCrossDSOCFIPass();
-
-//===----------------------------------------------------------------------===//
-// SampleProfilePass - Loads sample profile data from disk and generates
-// IR metadata to reflect the profile.
-ModulePass *createSampleProfileLoaderPass();
-ModulePass *createSampleProfileLoaderPass(StringRef Name);
 
 } // End llvm namespace
 

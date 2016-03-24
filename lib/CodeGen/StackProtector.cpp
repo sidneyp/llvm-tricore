@@ -373,7 +373,7 @@ bool StackProtector::InsertStackProtectors() {
   Value *StackGuardVar = nullptr; // The stack guard variable.
 
   for (Function::iterator I = F->begin(), E = F->end(); I != E;) {
-    BasicBlock *BB = &*I++;
+    BasicBlock *BB = I++;
     ReturnInst *RI = dyn_cast<ReturnInst>(BB->getTerminator());
     if (!RI)
       continue;
@@ -433,7 +433,7 @@ bool StackProtector::InsertStackProtectors() {
       BasicBlock *FailBB = CreateFailBB();
 
       // Split the basic block before the return instruction.
-      BasicBlock *NewBB = BB->splitBasicBlock(RI->getIterator(), "SP_return");
+      BasicBlock *NewBB = BB->splitBasicBlock(RI, "SP_return");
 
       // Update the dominator tree if we need to.
       if (DT && DT->isReachableFromEntry(BB)) {
@@ -453,20 +453,22 @@ bool StackProtector::InsertStackProtectors() {
       LoadInst *LI1 = B.CreateLoad(StackGuardVar);
       LoadInst *LI2 = B.CreateLoad(AI);
       Value *Cmp = B.CreateICmpEQ(LI1, LI2);
-      auto SuccessProb =
-          BranchProbabilityInfo::getBranchProbStackProtector(true);
-      auto FailureProb =
-          BranchProbabilityInfo::getBranchProbStackProtector(false);
+      unsigned SuccessWeight =
+          BranchProbabilityInfo::getBranchWeightStackProtector(true);
+      unsigned FailureWeight =
+          BranchProbabilityInfo::getBranchWeightStackProtector(false);
       MDNode *Weights = MDBuilder(F->getContext())
-                            .createBranchWeights(SuccessProb.getNumerator(),
-                                                 FailureProb.getNumerator());
+                            .createBranchWeights(SuccessWeight, FailureWeight);
       B.CreateCondBr(Cmp, NewBB, FailBB, Weights);
     }
   }
 
   // Return if we didn't modify any basic blocks. i.e., there are no return
   // statements in the function.
-  return HasPrologue;
+  if (!HasPrologue)
+    return false;
+
+  return true;
 }
 
 /// CreateFailBB - Create a basic block to jump to when the stack protector

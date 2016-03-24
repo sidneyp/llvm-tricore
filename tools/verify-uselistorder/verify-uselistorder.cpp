@@ -346,7 +346,6 @@ static void verifyAfterRoundTrip(const Module &M,
   if (!matches(ValueMapping(M), ValueMapping(*OtherM)))
     report_fatal_error("use-list order changed");
 }
-
 static void verifyBitcodeUseListOrder(const Module &M) {
   TempFile F;
   if (F.init("bc"))

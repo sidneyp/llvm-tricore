@@ -12,15 +12,9 @@ LIBRARYNAME = LLVMWebAssemblyCodeGen
 TARGET = WebAssembly
 
 # Make sure that tblgen is run, first thing.
-BUILT_SOURCES = \
-	WebAssemblyGenAsmWriter.inc \
-	WebAssemblyGenDAGISel.inc \
-	WebAssemblyGenFastISel.inc \
-	WebAssemblyGenInstrInfo.inc \
-	WebAssemblyGenMCCodeEmitter.inc \
-	WebAssemblyGenRegisterInfo.inc \
-	WebAssemblyGenSubtargetInfo.inc
+BUILT_SOURCES = WebAssemblyGenRegisterInfo.inc WebAssemblyGenSubtargetInfo.inc \
+		WebAssemblyGenMCCodeEmitter.inc
 
-DIRS = InstPrinter TargetInfo MCTargetDesc Disassembler
+DIRS = InstPrinter TargetInfo MCTargetDesc
 
 include $(LEVEL)/Makefile.common

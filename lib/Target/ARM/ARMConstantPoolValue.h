@@ -39,7 +39,8 @@ namespace ARMCP {
   enum ARMCPModifier {
     no_modifier,
     TLSGD,
-    GOT_PREL,
+    GOT,
+    GOTOFF,
     GOTTPOFF,
     TPOFF
   };
@@ -101,6 +102,8 @@ public:
   bool isBlockAddress() const { return Kind == ARMCP::CPBlockAddress; }
   bool isLSDA() const { return Kind == ARMCP::CPLSDA; }
   bool isMachineBasicBlock() const{ return Kind == ARMCP::CPMachineBasicBlock; }
+
+  unsigned getRelocationInfo() const override { return 2; }
 
   int getExistingMachineCPValue(MachineConstantPool *CP,
                                 unsigned Alignment) override;

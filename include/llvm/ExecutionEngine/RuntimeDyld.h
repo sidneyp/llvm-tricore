@@ -17,10 +17,8 @@
 #include "JITSymbolFlags.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/DebugInfo/DIContext.h"
-#include <map>
 #include <memory>
 
 namespace llvm {
@@ -61,33 +59,26 @@ public:
   class LoadedObjectInfo : public llvm::LoadedObjectInfo {
     friend class RuntimeDyldImpl;
   public:
-    typedef std::map<object::SectionRef, unsigned> ObjSectionToIDMap;
-
-    LoadedObjectInfo(RuntimeDyldImpl &RTDyld, ObjSectionToIDMap ObjSecToIDMap)
-      : RTDyld(RTDyld), ObjSecToIDMap(ObjSecToIDMap) { }
+    LoadedObjectInfo(RuntimeDyldImpl &RTDyld, unsigned BeginIdx,
+                     unsigned EndIdx)
+      : RTDyld(RTDyld), BeginIdx(BeginIdx), EndIdx(EndIdx) { }
 
     virtual object::OwningBinary<object::ObjectFile>
     getObjectForDebug(const object::ObjectFile &Obj) const = 0;
 
-    uint64_t
-    getSectionLoadAddress(const object::SectionRef &Sec) const override;
+    uint64_t getSectionLoadAddress(StringRef Name) const;
 
   protected:
     virtual void anchor();
 
     RuntimeDyldImpl &RTDyld;
-    ObjSectionToIDMap ObjSecToIDMap;
+    unsigned BeginIdx, EndIdx;
   };
 
   template <typename Derived> struct LoadedObjectInfoHelper : LoadedObjectInfo {
-  protected:
-    LoadedObjectInfoHelper(const LoadedObjectInfoHelper &) = default;
-    LoadedObjectInfoHelper() = default;
-
-  public:
-    LoadedObjectInfoHelper(RuntimeDyldImpl &RTDyld,
-                           LoadedObjectInfo::ObjSectionToIDMap ObjSecToIDMap)
-        : LoadedObjectInfo(RTDyld, std::move(ObjSecToIDMap)) {}
+    LoadedObjectInfoHelper(RuntimeDyldImpl &RTDyld, unsigned BeginIdx,
+                           unsigned EndIdx)
+        : LoadedObjectInfo(RTDyld, BeginIdx, EndIdx) {}
     std::unique_ptr<llvm::LoadedObjectInfo> clone() const override {
       return llvm::make_unique<Derived>(static_cast<const Derived &>(*this));
     }
@@ -95,10 +86,8 @@ public:
 
   /// \brief Memory Management.
   class MemoryManager {
-    friend class RuntimeDyld;
   public:
-    MemoryManager() : FinalizationLocked(false) {}
-    virtual ~MemoryManager() {}
+    virtual ~MemoryManager() {};
 
     /// Allocate a memory block of (at least) the given size suitable for
     /// executable code. The SectionID is a unique identifier assigned by the
@@ -124,11 +113,9 @@ public:
     ///
     /// Note that by default the callback is disabled. To enable it
     /// redefine the method needsToReserveAllocationSpace to return true.
-    virtual void reserveAllocationSpace(uintptr_t CodeSize, uint32_t CodeAlign,
-                                        uintptr_t RODataSize,
-                                        uint32_t RODataAlign,
-                                        uintptr_t RWDataSize,
-                                        uint32_t RWDataAlign) {}
+    virtual void reserveAllocationSpace(uintptr_t CodeSize,
+                                        uintptr_t DataSizeRO,
+                                        uintptr_t DataSizeRW) {}
 
     /// Override to return true to enable the reserveAllocationSpace callback.
     virtual bool needsToReserveAllocationSpace() { return false; }
@@ -155,29 +142,14 @@ public:
     /// Returns true if an error occurred, false otherwise.
     virtual bool finalizeMemory(std::string *ErrMsg = nullptr) = 0;
 
-    /// This method is called after an object has been loaded into memory but
-    /// before relocations are applied to the loaded sections.
-    ///
-    /// Memory managers which are preparing code for execution in an external
-    /// address space can use this call to remap the section addresses for the
-    /// newly loaded object.
-    ///
-    /// For clients that do not need access to an ExecutionEngine instance this
-    /// method should be preferred to its cousin
-    /// MCJITMemoryManager::notifyObjectLoaded as this method is compatible with
-    /// ORC JIT stacks.
-    virtual void notifyObjectLoaded(RuntimeDyld &RTDyld,
-                                    const object::ObjectFile &Obj) {}
-
   private:
     virtual void anchor();
-    bool FinalizationLocked;
   };
 
   /// \brief Symbol resolution.
   class SymbolResolver {
   public:
-    virtual ~SymbolResolver() {}
+    virtual ~SymbolResolver() {};
 
     /// This method returns the address of the specified function or variable.
     /// It is used to resolve symbols during module linking.
@@ -260,25 +232,6 @@ public:
     this->ProcessAllSections = ProcessAllSections;
   }
 
-  /// Perform all actions needed to make the code owned by this RuntimeDyld
-  /// instance executable:
-  ///
-  /// 1) Apply relocations.
-  /// 2) Register EH frames.
-  /// 3) Update memory permissions*.
-  ///
-  /// * Finalization is potentially recursive**, and the 3rd step will only be
-  ///   applied by the outermost call to finalize. This allows different
-  ///   RuntimeDyld instances to share a memory manager without the innermost
-  ///   finalization locking the memory and causing relocation fixup errors in
-  ///   outer instances.
-  ///
-  /// ** Recursive finalization occurs when one RuntimeDyld instances needs the
-  ///   address of a symbol owned by some other instance in order to apply
-  ///   relocations.
-  ///
-  void finalizeWithMemoryManagerLocking();
-
 private:
   // RuntimeDyldImpl is the actual class. RuntimeDyld is just the public
   // interface.
@@ -291,4 +244,4 @@ private:
 
 } // end namespace llvm
 
-#endif // LLVM_EXECUTIONENGINE_RUNTIMEDYLD_H
+#endif

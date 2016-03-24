@@ -23,7 +23,6 @@
 #include "llvm/MC/MCSymbolCOFF.h"
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCSymbolMachO.h"
-#include "llvm/Support/COFF.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
@@ -42,7 +41,7 @@ MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
       CurrentDwarfLoc(0, 0, 0, DWARF2_FLAG_IS_STMT, 0, 0), DwarfLocSeen(false),
       GenDwarfForAssembly(false), GenDwarfFileNumber(0), DwarfVersion(4),
       AllowTemporaryLabels(true), DwarfCompileUnitID(0),
-      AutoReset(DoAutoReset), HadError(false) {
+      AutoReset(DoAutoReset) {
 
   std::error_code EC = llvm::sys::fs::current_path(CompilationDir);
   if (EC)
@@ -63,6 +62,9 @@ MCContext::~MCContext() {
 
   // NOTE: The symbols are all allocated out of a bump pointer allocator,
   // we don't need to free them here.
+
+  // If the stream for the .secure_log_unique directive was created free it.
+  delete (raw_ostream *)SecureLog;
 }
 
 //===----------------------------------------------------------------------===//
@@ -71,11 +73,13 @@ MCContext::~MCContext() {
 
 void MCContext::reset() {
   // Call the destructors so the fragments are freed
-  COFFAllocator.DestroyAll();
-  ELFAllocator.DestroyAll();
-  MachOAllocator.DestroyAll();
+  for (auto &I : ELFUniquingMap)
+    I.second->~MCSectionELF();
+  for (auto &I : COFFUniquingMap)
+    I.second->~MCSectionCOFF();
+  for (auto &I : MachOUniquingMap)
+    I.second->~MCSectionMachO();
 
-  MCSubtargetAllocator.DestroyAll();
   UsedNames.clear();
   Symbols.clear();
   SectionSymbols.clear();
@@ -99,8 +103,6 @@ void MCContext::reset() {
   DwarfLocSeen = false;
   GenDwarfForAssembly = false;
   GenDwarfFileNumber = 0;
-
-  HadError = false;
 }
 
 //===----------------------------------------------------------------------===//
@@ -292,8 +294,8 @@ MCSectionMachO *MCContext::getMachOSection(StringRef Segment, StringRef Section,
     Begin = createTempSymbol(BeginSymName, false);
 
   // Otherwise, return a new section.
-  return Entry = new (MachOAllocator.Allocate()) MCSectionMachO(
-             Segment, Section, TypeAndAttributes, Reserved2, Kind, Begin);
+  return Entry = new (*this) MCSectionMachO(Segment, Section, TypeAndAttributes,
+                                            Reserved2, Kind, Begin);
 }
 
 void MCContext::renameELFSection(MCSectionELF *Section, StringRef Name) {
@@ -320,7 +322,7 @@ MCSectionELF *MCContext::createELFRelSection(StringRef Name, unsigned Type,
   bool Inserted;
   std::tie(I, Inserted) = ELFRelSecNames.insert(std::make_pair(Name, true));
 
-  return new (ELFAllocator.Allocate())
+  return new (*this)
       MCSectionELF(I->getKey(), Type, Flags, SectionKind::getReadOnly(),
                    EntrySize, Group, true, nullptr, Associated);
 }
@@ -365,15 +367,15 @@ MCSectionELF *MCContext::getELFSection(StringRef Section, unsigned Type,
   if (BeginSymName)
     Begin = createTempSymbol(BeginSymName, false);
 
-  MCSectionELF *Result = new (ELFAllocator.Allocate())
-      MCSectionELF(CachedName, Type, Flags, Kind, EntrySize, GroupSym, UniqueID,
-                   Begin, Associated);
+  MCSectionELF *Result =
+      new (*this) MCSectionELF(CachedName, Type, Flags, Kind, EntrySize,
+                               GroupSym, UniqueID, Begin, Associated);
   Entry.second = Result;
   return Result;
 }
 
 MCSectionELF *MCContext::createELFGroupSection(const MCSymbolELF *Group) {
-  MCSectionELF *Result = new (ELFAllocator.Allocate())
+  MCSectionELF *Result = new (*this)
       MCSectionELF(".group", ELF::SHT_GROUP, 0, SectionKind::getReadOnly(), 4,
                    Group, ~0, nullptr, nullptr);
   return Result;
@@ -402,7 +404,7 @@ MCSectionCOFF *MCContext::getCOFFSection(StringRef Section,
     Begin = createTempSymbol(BeginSymName, false);
 
   StringRef CachedName = Iter->first.SectionName;
-  MCSectionCOFF *Result = new (COFFAllocator.Allocate()) MCSectionCOFF(
+  MCSectionCOFF *Result = new (*this) MCSectionCOFF(
       CachedName, Characteristics, COMDATSymbol, Selection, Kind, Begin);
 
   Iter->second = Result;
@@ -439,10 +441,6 @@ MCSectionCOFF *MCContext::getAssociativeCOFFSection(MCSectionCOFF *Sec,
                         COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE);
 }
 
-MCSubtargetInfo &MCContext::getSubtargetCopy(const MCSubtargetInfo &STI) {
-  return *new (MCSubtargetAllocator.Allocate()) MCSubtargetInfo(STI);
-}
-
 //===----------------------------------------------------------------------===//
 // Dwarf Management
 //===----------------------------------------------------------------------===//
@@ -474,24 +472,14 @@ void MCContext::finalizeDwarfSections(MCStreamer &MCOS) {
       [&](MCSection *Sec) { return !MCOS.mayHaveInstructions(*Sec); });
 }
 
-//===----------------------------------------------------------------------===//
-// Error Reporting
-//===----------------------------------------------------------------------===//
-
-void MCContext::reportError(SMLoc Loc, const Twine &Msg) {
-  HadError = true;
-
-  // If we have a source manager use it. Otherwise just use the generic
-  // report_fatal_error().
-  if (!SrcMgr)
+void MCContext::reportFatalError(SMLoc Loc, const Twine &Msg) const {
+  // If we have a source manager and a location, use it. Otherwise just
+  // use the generic report_fatal_error().
+  if (!SrcMgr || Loc == SMLoc())
     report_fatal_error(Msg, false);
 
   // Use the source manager to print the message.
   SrcMgr->PrintMessage(Loc, SourceMgr::DK_Error, Msg);
-}
-
-void MCContext::reportFatalError(SMLoc Loc, const Twine &Msg) {
-  reportError(Loc, Msg);
 
   // If we reached here, we are failing ungracefully. Run the interrupt handlers
   // to make sure any special cleanups get done, in particular that we remove

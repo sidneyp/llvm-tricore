@@ -63,6 +63,8 @@ public:
     return true;
   }
 
+  bool needsStackRealignment(const MachineFunction &MF) const override;
+
   /// Returns true if the frame pointer is valid.
   bool useFPForScavengingIndex(const MachineFunction &MF) const override;
 

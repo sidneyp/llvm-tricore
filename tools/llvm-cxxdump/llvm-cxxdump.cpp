@@ -40,14 +40,18 @@ cl::list<std::string> InputFilenames(cl::Positional,
                                      cl::ZeroOrMore);
 } // namespace opts
 
+static int ReturnValue = EXIT_SUCCESS;
+
 namespace llvm {
 
-static void error(std::error_code EC) {
+static bool error(std::error_code EC) {
   if (!EC)
-    return;
+    return false;
+
+  ReturnValue = EXIT_FAILURE;
   outs() << "\nError reading file: " << EC.message() << ".\n";
   outs().flush();
-  exit(1);
+  return true;
 }
 
 } // namespace llvm
@@ -55,24 +59,38 @@ static void error(std::error_code EC) {
 static void reportError(StringRef Input, StringRef Message) {
   if (Input == "-")
     Input = "<stdin>";
+
   errs() << Input << ": " << Message << "\n";
   errs().flush();
-  exit(1);
+  ReturnValue = EXIT_FAILURE;
 }
 
 static void reportError(StringRef Input, std::error_code EC) {
   reportError(Input, EC.message());
 }
 
-static std::map<SectionRef, SmallVector<SectionRef, 1>> SectionRelocMap;
+static SmallVectorImpl<SectionRef> &getRelocSections(const ObjectFile *Obj,
+                                                     const SectionRef &Sec) {
+  static bool MappingDone = false;
+  static std::map<SectionRef, SmallVector<SectionRef, 1>> SectionRelocMap;
+  if (!MappingDone) {
+    for (const SectionRef &Section : Obj->sections()) {
+      section_iterator Sec2 = Section.getRelocatedSection();
+      if (Sec2 != Obj->section_end())
+        SectionRelocMap[*Sec2].push_back(Section);
+    }
+    MappingDone = true;
+  }
+  return SectionRelocMap[Sec];
+}
 
-static void collectRelocatedSymbols(const ObjectFile *Obj,
+static bool collectRelocatedSymbols(const ObjectFile *Obj,
                                     const SectionRef &Sec, uint64_t SecAddress,
                                     uint64_t SymAddress, uint64_t SymSize,
                                     StringRef *I, StringRef *E) {
   uint64_t SymOffset = SymAddress - SecAddress;
   uint64_t SymEnd = SymOffset + SymSize;
-  for (const SectionRef &SR : SectionRelocMap[Sec]) {
+  for (const SectionRef &SR : getRelocSections(Obj, Sec)) {
     for (const object::RelocationRef &Reloc : SR.relocations()) {
       if (I == E)
         break;
@@ -80,7 +98,8 @@ static void collectRelocatedSymbols(const ObjectFile *Obj,
       if (RelocSymI == Obj->symbol_end())
         continue;
       ErrorOr<StringRef> RelocSymName = RelocSymI->getName();
-      error(RelocSymName.getError());
+      if (error(RelocSymName.getError()))
+        return true;
       uint64_t Offset = Reloc.getOffset();
       if (Offset >= SymOffset && Offset < SymEnd) {
         *I = *RelocSymName;
@@ -88,26 +107,29 @@ static void collectRelocatedSymbols(const ObjectFile *Obj,
       }
     }
   }
+  return false;
 }
 
-static void collectRelocationOffsets(
+static bool collectRelocationOffsets(
     const ObjectFile *Obj, const SectionRef &Sec, uint64_t SecAddress,
     uint64_t SymAddress, uint64_t SymSize, StringRef SymName,
     std::map<std::pair<StringRef, uint64_t>, StringRef> &Collection) {
   uint64_t SymOffset = SymAddress - SecAddress;
   uint64_t SymEnd = SymOffset + SymSize;
-  for (const SectionRef &SR : SectionRelocMap[Sec]) {
+  for (const SectionRef &SR : getRelocSections(Obj, Sec)) {
     for (const object::RelocationRef &Reloc : SR.relocations()) {
       const object::symbol_iterator RelocSymI = Reloc.getSymbol();
       if (RelocSymI == Obj->symbol_end())
         continue;
       ErrorOr<StringRef> RelocSymName = RelocSymI->getName();
-      error(RelocSymName.getError());
+      if (error(RelocSymName.getError()))
+        return true;
       uint64_t Offset = Reloc.getOffset();
       if (Offset >= SymOffset && Offset < SymEnd)
         Collection[std::make_pair(SymName, Offset - SymOffset)] = *RelocSymName;
     }
   }
+  return false;
 }
 
 static void dumpCXXData(const ObjectFile *Obj) {
@@ -160,13 +182,6 @@ static void dumpCXXData(const ObjectFile *Obj) {
   std::map<std::pair<StringRef, uint64_t>, StringRef> VTTEntries;
   std::map<StringRef, StringRef> TINames;
 
-  SectionRelocMap.clear();
-  for (const SectionRef &Section : Obj->sections()) {
-    section_iterator Sec2 = Section.getRelocatedSection();
-    if (Sec2 != Obj->section_end())
-      SectionRelocMap[*Sec2].push_back(Section);
-  }
-
   uint8_t BytesInAddress = Obj->getBytesInAddress();
 
   std::vector<std::pair<SymbolRef, uint64_t>> SymAddr =
@@ -176,11 +191,12 @@ static void dumpCXXData(const ObjectFile *Obj) {
     object::SymbolRef Sym = P.first;
     uint64_t SymSize = P.second;
     ErrorOr<StringRef> SymNameOrErr = Sym.getName();
-    error(SymNameOrErr.getError());
+    if (error(SymNameOrErr.getError()))
+      return;
     StringRef SymName = *SymNameOrErr;
-    ErrorOr<object::section_iterator> SecIOrErr = Sym.getSection();
-    error(SecIOrErr.getError());
-    object::section_iterator SecI = *SecIOrErr;
+    object::section_iterator SecI(Obj->section_begin());
+    if (error(Sym.getSection(SecI)))
+      return;
     // Skip external symbols.
     if (SecI == Obj->section_end())
       continue;
@@ -189,9 +205,11 @@ static void dumpCXXData(const ObjectFile *Obj) {
     if (Sec.isBSS() || Sec.isVirtual())
       continue;
     StringRef SecContents;
-    error(Sec.getContents(SecContents));
+    if (error(Sec.getContents(SecContents)))
+      return;
     ErrorOr<uint64_t> SymAddressOrErr = Sym.getAddress();
-    error(SymAddressOrErr.getError());
+    if (error(SymAddressOrErr.getError()))
+      return;
     uint64_t SymAddress = *SymAddressOrErr;
     uint64_t SecAddress = Sec.getAddress();
     uint64_t SecSize = Sec.getSize();
@@ -218,19 +236,23 @@ static void dumpCXXData(const ObjectFile *Obj) {
     // Complete object locators in the MS-ABI start with '??_R4'
     else if (SymName.startswith("??_R4")) {
       CompleteObjectLocator COL;
-      COL.Data = makeArrayRef(
+      COL.Data = ArrayRef<little32_t>(
           reinterpret_cast<const little32_t *>(SymContents.data()), 3);
       StringRef *I = std::begin(COL.Symbols), *E = std::end(COL.Symbols);
-      collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
+      if (collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I,
+                                  E))
+        return;
       COLs[SymName] = COL;
     }
     // Class hierarchy descriptors in the MS-ABI start with '??_R3'
     else if (SymName.startswith("??_R3")) {
       ClassHierarchyDescriptor CHD;
-      CHD.Data = makeArrayRef(
+      CHD.Data = ArrayRef<little32_t>(
           reinterpret_cast<const little32_t *>(SymContents.data()), 3);
       StringRef *I = std::begin(CHD.Symbols), *E = std::end(CHD.Symbols);
-      collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
+      if (collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I,
+                                  E))
+        return;
       CHDs[SymName] = CHD;
     }
     // Class hierarchy descriptors in the MS-ABI start with '??_R2'
@@ -243,10 +265,12 @@ static void dumpCXXData(const ObjectFile *Obj) {
     // Base class descriptors in the MS-ABI start with '??_R1'
     else if (SymName.startswith("??_R1")) {
       BaseClassDescriptor BCD;
-      BCD.Data = makeArrayRef(
+      BCD.Data = ArrayRef<little32_t>(
           reinterpret_cast<const little32_t *>(SymContents.data()) + 1, 5);
       StringRef *I = std::begin(BCD.Symbols), *E = std::end(BCD.Symbols);
-      collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
+      if (collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I,
+                                  E))
+        return;
       BCDs[SymName] = BCD;
     }
     // Type descriptors in the MS-ABI start with '??_R0'
@@ -259,7 +283,9 @@ static void dumpCXXData(const ObjectFile *Obj) {
         TD.AlwaysZero = *reinterpret_cast<const little32_t *>(DataPtr);
       TD.MangledName = SymContents.drop_front(BytesInAddress * 2);
       StringRef *I = std::begin(TD.Symbols), *E = std::end(TD.Symbols);
-      collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
+      if (collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I,
+                                  E))
+        return;
       TDs[SymName] = TD;
     }
     // Throw descriptors in the MS-ABI start with '_TI'
@@ -290,7 +316,9 @@ static void dumpCXXData(const ObjectFile *Obj) {
       CT.VirtualBaseAdjustmentOffset = DataPtr[4];
       CT.Size = DataPtr[5];
       StringRef *I = std::begin(CT.Symbols), *E = std::end(CT.Symbols);
-      collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
+      if (collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I,
+                                  E))
+        return;
       CTs[SymName] = CT;
     }
     // Construction vtables in the Itanium ABI start with '_ZTT' or '__ZTT'.
@@ -482,9 +510,7 @@ static void dumpCXXData(const ObjectFile *Obj) {
 }
 
 static void dumpArchive(const Archive *Arc) {
-  for (auto &ErrorOrChild : Arc->children()) {
-    error(ErrorOrChild.getError());
-    const Archive::Child &ArcC = *ErrorOrChild;
+  for (const Archive::Child &ArcC : Arc->children()) {
     ErrorOr<std::unique_ptr<Binary>> ChildOrErr = ArcC.getAsBinary();
     if (std::error_code EC = ChildOrErr.getError()) {
       // Ignore non-object files.
@@ -501,6 +527,12 @@ static void dumpArchive(const Archive *Arc) {
 }
 
 static void dumpInput(StringRef File) {
+  // If file isn't stdin, check that it exists.
+  if (File != "-" && !sys::fs::exists(File)) {
+    reportError(File, cxxdump_error::file_not_found);
+    return;
+  }
+
   // Attempt to open the binary.
   ErrorOr<OwningBinary<Binary>> BinaryOrErr = createBinary(File);
   if (std::error_code EC = BinaryOrErr.getError()) {
@@ -537,5 +569,5 @@ int main(int argc, const char *argv[]) {
   std::for_each(opts::InputFilenames.begin(), opts::InputFilenames.end(),
                 dumpInput);
 
-  return EXIT_SUCCESS;
+  return ReturnValue;
 }

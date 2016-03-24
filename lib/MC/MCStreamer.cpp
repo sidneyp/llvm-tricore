@@ -107,7 +107,8 @@ void MCStreamer::EmitSLEB128IntValue(int64_t Value) {
   EmitBytes(OSE.str());
 }
 
-void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size, SMLoc Loc) {
+void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size,
+                           const SMLoc &Loc) {
   EmitValueImpl(Value, Size, Loc);
 }
 
@@ -188,9 +189,11 @@ void MCStreamer::InitSections(bool NoExecStack) {
   SwitchSection(getContext().getObjectFileInfo()->getTextSection());
 }
 
-void MCStreamer::AssignFragment(MCSymbol *Symbol, MCFragment *Fragment) {
-  assert(Fragment);
-  Symbol->setFragment(Fragment);
+void MCStreamer::AssignSection(MCSymbol *Symbol, MCSection *Section) {
+  if (Section)
+    Symbol->setSection(*Section);
+  else
+    Symbol->setUndefined();
 
   // As we emit symbols into a section, track the order so that they can
   // be sorted upon later. Zero is reserved to mean 'unemitted'.
@@ -200,8 +203,7 @@ void MCStreamer::AssignFragment(MCSymbol *Symbol, MCFragment *Fragment) {
 void MCStreamer::EmitLabel(MCSymbol *Symbol) {
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
   assert(getCurrentSection().first && "Cannot emit before setting section!");
-  assert(!Symbol->getFragment() && "Unexpected fragment on symbol data!");
-  Symbol->setFragment(&getCurrentSectionOnly()->getDummyFragment());
+  AssignSection(Symbol, getCurrentSection().first);
 
   MCTargetStreamer *TS = getTargetStreamer();
   if (TS)
@@ -359,14 +361,6 @@ void MCStreamer::EmitCFIEscape(StringRef Values) {
   CurFrame->Instructions.push_back(Instruction);
 }
 
-void MCStreamer::EmitCFIGnuArgsSize(int64_t Size) {
-  MCSymbol *Label = EmitCFICommon();
-  MCCFIInstruction Instruction = 
-    MCCFIInstruction::createGnuArgsSize(Label, Size);
-  MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
-  CurFrame->Instructions.push_back(Instruction);
-}
-
 void MCStreamer::EmitCFISignalFrame() {
   EnsureValidDwarfFrame();
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
@@ -472,8 +466,6 @@ void MCStreamer::EmitWinEHHandlerData() {
   if (CurrentWinFrameInfo->ChainedParent)
     report_fatal_error("Chained unwind areas can't have handlers!");
 }
-
-void MCStreamer::EmitSyntaxDirective() {}
 
 void MCStreamer::EmitWinCFIPushReg(unsigned Register) {
   EnsureValidWinFrameInfo();
@@ -687,7 +679,8 @@ void MCStreamer::EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
 void MCStreamer::ChangeSection(MCSection *, const MCExpr *) {}
 void MCStreamer::EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) {}
 void MCStreamer::EmitBytes(StringRef Data) {}
-void MCStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size, SMLoc Loc) {
+void MCStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
+                               const SMLoc &Loc) {
   visitUsedExpr(*Value);
 }
 void MCStreamer::EmitULEB128Value(const MCExpr *Value) {}
@@ -697,7 +690,9 @@ void MCStreamer::EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
                                       unsigned MaxBytesToEmit) {}
 void MCStreamer::EmitCodeAlignment(unsigned ByteAlignment,
                                    unsigned MaxBytesToEmit) {}
-void MCStreamer::emitValueToOffset(const MCExpr *Offset, unsigned char Value) {}
+bool MCStreamer::EmitValueToOffset(const MCExpr *Offset, unsigned char Value) {
+  return false;
+}
 void MCStreamer::EmitBundleAlignMode(unsigned AlignPow2) {}
 void MCStreamer::EmitBundleLock(bool AlignToEnd) {}
 void MCStreamer::FinishImpl() {}

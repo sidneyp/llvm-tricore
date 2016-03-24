@@ -32,42 +32,35 @@ struct FlagDescription {
   int   Default;
   int   *IntFlag;
   const char **StrFlag;
-  unsigned int *UIntFlag;
 };
 
 struct {
 #define FUZZER_FLAG_INT(Name, Default, Description) int Name;
-#define FUZZER_FLAG_UNSIGNED(Name, Default, Description) unsigned int Name;
 #define FUZZER_FLAG_STRING(Name, Description) const char *Name;
 #include "FuzzerFlags.def"
 #undef FUZZER_FLAG_INT
-#undef FUZZER_FLAG_UNSIGNED
 #undef FUZZER_FLAG_STRING
 } Flags;
 
-static const FlagDescription FlagDescriptions [] {
+static FlagDescription FlagDescriptions [] {
 #define FUZZER_FLAG_INT(Name, Default, Description)                            \
-  {#Name, Description, Default, &Flags.Name, nullptr, nullptr},
-#define FUZZER_FLAG_UNSIGNED(Name, Default, Description)                       \
-  {#Name,   Description, static_cast<int>(Default),                            \
-   nullptr, nullptr, &Flags.Name},
+  { #Name, Description, Default, &Flags.Name, nullptr},
 #define FUZZER_FLAG_STRING(Name, Description)                                  \
-  {#Name, Description, 0, nullptr, &Flags.Name, nullptr},
+  { #Name, Description, 0, nullptr, &Flags.Name },
 #include "FuzzerFlags.def"
 #undef FUZZER_FLAG_INT
-#undef FUZZER_FLAG_UNSIGNED
 #undef FUZZER_FLAG_STRING
 };
 
 static const size_t kNumFlags =
     sizeof(FlagDescriptions) / sizeof(FlagDescriptions[0]);
 
-static std::vector<std::string> *Inputs;
-static std::string *ProgName;
+static std::vector<std::string> inputs;
+static const char *ProgName;
 
 static void PrintHelp() {
   Printf("Usage: %s [-flag1=val1 [-flag2=val2 ...] ] [dir1 [dir2 ...] ]\n",
-         ProgName->c_str());
+         ProgName);
   Printf("\nFlags: (strictly in form -flag=value)\n");
   size_t MaxFlagLen = 0;
   for (size_t F = 0; F < kNumFlags; F++)
@@ -113,12 +106,6 @@ static bool ParseOneFlag(const char *Param) {
         if (Flags.verbosity >= 2)
           Printf("Flag: %s %d\n", Name, Val);;
         return true;
-      } else if (FlagDescriptions[F].UIntFlag) {
-        unsigned int Val = std::stoul(Str);
-        *FlagDescriptions[F].UIntFlag = Val;
-        if (Flags.verbosity >= 2)
-          Printf("Flag: %s %u\n", Name, Val);
-        return true;
       } else if (FlagDescriptions[F].StrFlag) {
         *FlagDescriptions[F].StrFlag = Str;
         if (Flags.verbosity >= 2)
@@ -132,20 +119,16 @@ static bool ParseOneFlag(const char *Param) {
 }
 
 // We don't use any library to minimize dependencies.
-static void ParseFlags(const std::vector<std::string> &Args) {
+static void ParseFlags(int argc, char **argv) {
   for (size_t F = 0; F < kNumFlags; F++) {
     if (FlagDescriptions[F].IntFlag)
       *FlagDescriptions[F].IntFlag = FlagDescriptions[F].Default;
-    if (FlagDescriptions[F].UIntFlag)
-      *FlagDescriptions[F].UIntFlag =
-          static_cast<unsigned int>(FlagDescriptions[F].Default);
     if (FlagDescriptions[F].StrFlag)
       *FlagDescriptions[F].StrFlag = nullptr;
   }
-  Inputs = new std::vector<std::string>;
-  for (size_t A = 1; A < Args.size(); A++) {
-    if (ParseOneFlag(Args[A].c_str())) continue;
-    Inputs->push_back(Args[A]);
+  for (int A = 1; A < argc; A++) {
+    if (ParseOneFlag(argv[A])) continue;
+    inputs.push_back(argv[A]);
   }
 }
 
@@ -168,7 +151,7 @@ static void WorkerThread(const std::string &Cmd, std::atomic<int> *Counter,
     std::string ToRun = Cmd + " > " + Log + " 2>&1\n";
     if (Flags.verbosity)
       Printf("%s", ToRun.c_str());
-    int ExitCode = ExecuteCommand(ToRun.c_str());
+    int ExitCode = system(ToRun.c_str());
     if (ExitCode != 0)
       *HasErrors = true;
     std::lock_guard<std::mutex> Lock(Mu);
@@ -178,15 +161,15 @@ static void WorkerThread(const std::string &Cmd, std::atomic<int> *Counter,
   }
 }
 
-static int RunInMultipleProcesses(const std::vector<std::string> &Args,
-                                  int NumWorkers, int NumJobs) {
+static int RunInMultipleProcesses(int argc, char **argv, int NumWorkers,
+                                  int NumJobs) {
   std::atomic<int> Counter(0);
   std::atomic<bool> HasErrors(false);
   std::string Cmd;
-  for (auto &S : Args) {
-    if (FlagValue(S.c_str(), "jobs") || FlagValue(S.c_str(), "workers"))
-      continue;
-    Cmd += S + " ";
+  for (int i = 0; i < argc; i++) {
+    if (FlagValue(argv[i], "jobs") || FlagValue(argv[i], "workers")) continue;
+    Cmd += argv[i];
+    Cmd += " ";
   }
   std::vector<std::thread> V;
   std::thread Pulse(PulseThread);
@@ -198,37 +181,36 @@ static int RunInMultipleProcesses(const std::vector<std::string> &Args,
   return HasErrors ? 1 : 0;
 }
 
-int RunOneTest(Fuzzer *F, const char *InputFilePath) {
+std::vector<std::string> ReadTokensFile(const char *TokensFilePath) {
+  if (!TokensFilePath) return {};
+  std::string TokensFileContents = FileToString(TokensFilePath);
+  std::istringstream ISS(TokensFileContents);
+  std::vector<std::string> Res = {std::istream_iterator<std::string>{ISS},
+                                  std::istream_iterator<std::string>{}};
+  Res.push_back(" ");
+  Res.push_back("\t");
+  Res.push_back("\n");
+  return Res;
+}
+
+int ApplyTokens(const Fuzzer &F, const char *InputFilePath) {
   Unit U = FileToVector(InputFilePath);
-  Unit PreciseSizedU(U);
-  assert(PreciseSizedU.size() == PreciseSizedU.capacity());
-  F->ExecuteCallback(PreciseSizedU);
+  auto T = F.SubstituteTokens(U);
+  T.push_back(0);
+  Printf("%s", T.data());
   return 0;
 }
 
 int FuzzerDriver(int argc, char **argv, UserCallback Callback) {
-  FuzzerRandomLibc Rand(0);
-  SimpleUserSuppliedFuzzer SUSF(&Rand, Callback);
+  SimpleUserSuppliedFuzzer SUSF(Callback);
   return FuzzerDriver(argc, argv, SUSF);
 }
 
 int FuzzerDriver(int argc, char **argv, UserSuppliedFuzzer &USF) {
-  std::vector<std::string> Args(argv, argv + argc);
-  return FuzzerDriver(Args, USF);
-}
-
-int FuzzerDriver(const std::vector<std::string> &Args, UserCallback Callback) {
-  FuzzerRandomLibc Rand(0);
-  SimpleUserSuppliedFuzzer SUSF(&Rand, Callback);
-  return FuzzerDriver(Args, SUSF);
-}
-
-int FuzzerDriver(const std::vector<std::string> &Args,
-                 UserSuppliedFuzzer &USF) {
   using namespace fuzzer;
-  assert(!Args.empty());
-  ProgName = new std::string(Args[0]);
-  ParseFlags(Args);
+
+  ProgName = argv[0];
+  ParseFlags(argc, argv);
   if (Flags.help) {
     PrintHelp();
     return 0;
@@ -241,69 +223,33 @@ int FuzzerDriver(const std::vector<std::string> &Args,
   }
 
   if (Flags.workers > 0 && Flags.jobs > 0)
-    return RunInMultipleProcesses(Args, Flags.workers, Flags.jobs);
+    return RunInMultipleProcesses(argc, argv, Flags.workers, Flags.jobs);
 
   Fuzzer::FuzzingOptions Options;
   Options.Verbosity = Flags.verbosity;
   Options.MaxLen = Flags.max_len;
   Options.UnitTimeoutSec = Flags.timeout;
-  Options.MaxTotalTimeSec = Flags.max_total_time;
   Options.DoCrossOver = Flags.cross_over;
   Options.MutateDepth = Flags.mutate_depth;
   Options.ExitOnFirst = Flags.exit_on_first;
   Options.UseCounters = Flags.use_counters;
-  Options.UseIndirCalls = Flags.use_indir_calls;
   Options.UseTraces = Flags.use_traces;
-  Options.ShuffleAtStartUp = Flags.shuffle;
+  Options.UseFullCoverageSet = Flags.use_full_coverage_set;
   Options.PreferSmallDuringInitialShuffle =
       Flags.prefer_small_during_initial_shuffle;
+  Options.Tokens = ReadTokensFile(Flags.tokens);
   Options.Reload = Flags.reload;
-  Options.OnlyASCII = Flags.only_ascii;
-  Options.OutputCSV = Flags.output_csv;
   if (Flags.runs >= 0)
     Options.MaxNumberOfRuns = Flags.runs;
-  if (!Inputs->empty())
-    Options.OutputCorpus = (*Inputs)[0];
+  if (!inputs.empty())
+    Options.OutputCorpus = inputs[0];
   if (Flags.sync_command)
     Options.SyncCommand = Flags.sync_command;
   Options.SyncTimeout = Flags.sync_timeout;
-  Options.ReportSlowUnits = Flags.report_slow_units;
-  if (Flags.artifact_prefix)
-    Options.ArtifactPrefix = Flags.artifact_prefix;
-  if (Flags.exact_artifact_path)
-    Options.ExactArtifactPath = Flags.exact_artifact_path;
-  std::vector<Unit> Dictionary;
-  if (Flags.dict)
-    if (!ParseDictionaryFile(FileToString(Flags.dict), &Dictionary))
-      return 1;
-  if (Flags.verbosity > 0 && !Dictionary.empty())
-    Printf("Dictionary: %zd entries\n", Dictionary.size());
-  Options.SaveArtifacts = !Flags.test_single_input;
-  Options.PrintNewCovPcs = Flags.print_new_cov_pcs;
-
   Fuzzer F(USF, Options);
 
-  for (auto &U: Dictionary)
-    USF.GetMD().AddWordToManualDictionary(U);
-
-  // Timer
-  if (Flags.timeout > 0)
-    SetTimer(Flags.timeout / 2 + 1);
-
-  if (Flags.test_single_input) {
-    RunOneTest(&F, Flags.test_single_input);
-    exit(0);
-  }
-
-  if (Flags.save_minimized_corpus) {
-    Printf("The flag -save_minimized_corpus is deprecated; use -merge=1\n");
-    exit(1);
-  }
-
-  if (Flags.merge) {
-    F.Merge(*Inputs);
-    exit(0);
-  }
+  if (Flags.apply_tokens)
+    return ApplyTokens(F, Flags.apply_tokens);
 
   unsigned Seed = Flags.seed;
   // Initialize Seed.
@@ -311,26 +257,35 @@ int FuzzerDriver(const std::vector<std::string> &Args,
     Seed = time(0) * 10000 + getpid();
   if (Flags.verbosity)
     Printf("Seed: %u\n", Seed);
-  USF.GetRand().ResetSeed(Seed);
+  srand(Seed);
+
+  // Timer
+  if (Flags.timeout > 0)
+    SetTimer(Flags.timeout / 2 + 1);
+
+  if (Flags.verbosity >= 2) {
+    Printf("Tokens: {");
+    for (auto &T : Options.Tokens)
+      Printf("%s,", T.c_str());
+    Printf("}\n");
+  }
 
   F.RereadOutputCorpus();
-  for (auto &inp : *Inputs)
+  for (auto &inp : inputs)
     if (inp != Options.OutputCorpus)
       F.ReadDir(inp, nullptr);
 
   if (F.CorpusSize() == 0)
     F.AddToCorpus(Unit());  // Can't fuzz empty corpus, so add an empty input.
   F.ShuffleAndMinimize();
-  if (Flags.drill)
-    F.Drill();
-  else
-    F.Loop();
-
+  if (Flags.save_minimized_corpus)
+    F.SaveCorpus();
+  F.Loop(Flags.iterations < 0 ? INT_MAX : Flags.iterations);
   if (Flags.verbosity)
     Printf("Done %d runs in %zd second(s)\n", F.getTotalNumberOfRuns(),
            F.secondsSinceProcessStartUp());
 
-  exit(0);  // Don't let F destroy itself.
+  return 0;
 }
 
 }  // namespace fuzzer

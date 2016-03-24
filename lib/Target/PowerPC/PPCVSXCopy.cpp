@@ -77,14 +77,6 @@ namespace {
       return IsRegInClass(Reg, &PPC::F8RCRegClass, MRI);
     }
 
-    bool IsVSFReg(unsigned Reg, MachineRegisterInfo &MRI) {
-      return IsRegInClass(Reg, &PPC::VSFRCRegClass, MRI);
-    }
-
-    bool IsVSSReg(unsigned Reg, MachineRegisterInfo &MRI) {
-      return IsRegInClass(Reg, &PPC::VSSRCRegClass, MRI);
-    }
-
 protected:
     bool processBlock(MachineBasicBlock &MBB) {
       bool Changed = false;
@@ -108,9 +100,7 @@ protected:
             IsVRReg(SrcMO.getReg(), MRI) ? &PPC::VSHRCRegClass :
                                            &PPC::VSLRCRegClass;
           assert((IsF8Reg(SrcMO.getReg(), MRI) ||
-                  IsVRReg(SrcMO.getReg(), MRI) ||
-                  IsVSSReg(SrcMO.getReg(), MRI) ||
-                  IsVSFReg(SrcMO.getReg(), MRI)) &&
+                  IsVRReg(SrcMO.getReg(), MRI)) &&
                  "Unknown source for a VSX copy");
 
           unsigned NewVReg = MRI.createVirtualRegister(SrcRC);
@@ -133,8 +123,6 @@ protected:
             IsVRReg(DstMO.getReg(), MRI) ? &PPC::VSHRCRegClass :
                                            &PPC::VSLRCRegClass;
           assert((IsF8Reg(DstMO.getReg(), MRI) ||
-                  IsVSFReg(DstMO.getReg(), MRI) ||
-                  IsVSSReg(DstMO.getReg(), MRI) ||
                   IsVRReg(DstMO.getReg(), MRI)) &&
                  "Unknown destination for a VSX copy");
 

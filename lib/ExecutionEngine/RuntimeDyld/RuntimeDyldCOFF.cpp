@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "RuntimeDyldCOFF.h"
-#include "Targets/RuntimeDyldCOFFI386.h"
 #include "Targets/RuntimeDyldCOFFX86_64.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
@@ -25,11 +24,12 @@ using namespace llvm::object;
 
 namespace {
 
-class LoadedCOFFObjectInfo final
+class LoadedCOFFObjectInfo
     : public RuntimeDyld::LoadedObjectInfoHelper<LoadedCOFFObjectInfo> {
 public:
-  LoadedCOFFObjectInfo(RuntimeDyldImpl &RTDyld, ObjSectionToIDMap ObjSecToIDMap)
-      : LoadedObjectInfoHelper(RTDyld, std::move(ObjSecToIDMap)) {}
+  LoadedCOFFObjectInfo(RuntimeDyldImpl &RTDyld, unsigned BeginIdx,
+                       unsigned EndIdx)
+      : LoadedObjectInfoHelper(RTDyld, BeginIdx, EndIdx) {}
 
   OwningBinary<ObjectFile>
   getObjectForDebug(const ObjectFile &Obj) const override {
@@ -48,8 +48,6 @@ llvm::RuntimeDyldCOFF::create(Triple::ArchType Arch,
   default:
     llvm_unreachable("Unsupported target for RuntimeDyldCOFF.");
     break;
-  case Triple::x86:
-    return make_unique<RuntimeDyldCOFFI386>(MemMgr, Resolver);
   case Triple::x86_64:
     return make_unique<RuntimeDyldCOFFX86_64>(MemMgr, Resolver);
   }
@@ -57,7 +55,10 @@ llvm::RuntimeDyldCOFF::create(Triple::ArchType Arch,
 
 std::unique_ptr<RuntimeDyld::LoadedObjectInfo>
 RuntimeDyldCOFF::loadObject(const object::ObjectFile &O) {
-  return llvm::make_unique<LoadedCOFFObjectInfo>(*this, loadObjectImpl(O));
+  unsigned SectionStartIdx, SectionEndIdx;
+  std::tie(SectionStartIdx, SectionEndIdx) = loadObjectImpl(O);
+  return llvm::make_unique<LoadedCOFFObjectInfo>(*this, SectionStartIdx,
+                                                 SectionEndIdx);
 }
 
 uint64_t RuntimeDyldCOFF::getSymbolOffset(const SymbolRef &Sym) {

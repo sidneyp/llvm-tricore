@@ -20,8 +20,7 @@
 using namespace llvm;
 
 LogBuilder::~LogBuilder() {
-  if (consumer)
-    consumer->logf(*this);
+  consumer.logf(*this);
 }
 
 StringRef LogBuilder::getFormat() const { return Format; }

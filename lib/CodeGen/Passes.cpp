@@ -13,11 +13,7 @@
 //===---------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Analysis/BasicAliasAnalysis.h"
-#include "llvm/Analysis/CFLAliasAnalysis.h"
 #include "llvm/Analysis/Passes.h"
-#include "llvm/Analysis/ScopedNoAliasAA.h"
-#include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
 #include "llvm/IR/IRPrintingPasses.h"
@@ -56,6 +52,9 @@ static cl::opt<bool> DisableMachineLICM("disable-machine-licm", cl::Hidden,
     cl::desc("Disable Machine LICM"));
 static cl::opt<bool> DisableMachineCSE("disable-machine-cse", cl::Hidden,
     cl::desc("Disable Machine Common Subexpression Elimination"));
+static cl::opt<cl::boolOrDefault>
+    EnableShrinkWrapOpt("enable-shrink-wrap", cl::Hidden,
+                        cl::desc("enable the shrink-wrapping pass"));
 static cl::opt<cl::boolOrDefault> OptimizeRegAlloc(
     "optimize-regalloc", cl::Hidden,
     cl::desc("Enable optimized register allocation compilation path."));
@@ -96,10 +95,10 @@ PrintMachineInstrs("print-machineinstrs", cl::ValueOptional,
 
 // Temporary option to allow experimenting with MachineScheduler as a post-RA
 // scheduler. Targets can "properly" enable this with
-// substitutePass(&PostRASchedulerID, &PostMachineSchedulerID).
-// Targets can return true in targetSchedulesPostRAScheduling() and
-// insert a PostRA scheduling pass wherever it wants.
-cl::opt<bool> MISchedPostRA("misched-postra", cl::Hidden,
+// substitutePass(&PostRASchedulerID, &PostMachineSchedulerID); Ideally it
+// wouldn't be part of the standard pass pipeline, and the target would just add
+// a PostRA scheduling pass wherever it wants.
+static cl::opt<bool> MISchedPostRA("misched-postra", cl::Hidden,
   cl::desc("Run MachineScheduler post regalloc (independent of preRA sched)"));
 
 // Experimental option to run live interval analysis early.
@@ -189,29 +188,6 @@ char TargetPassConfig::ID = 0;
 char TargetPassConfig::EarlyTailDuplicateID = 0;
 char TargetPassConfig::PostRAMachineLICMID = 0;
 
-namespace {
-struct InsertedPass {
-  AnalysisID TargetPassID;
-  IdentifyingPassPtr InsertedPassID;
-  bool VerifyAfter;
-  bool PrintAfter;
-
-  InsertedPass(AnalysisID TargetPassID, IdentifyingPassPtr InsertedPassID,
-               bool VerifyAfter, bool PrintAfter)
-      : TargetPassID(TargetPassID), InsertedPassID(InsertedPassID),
-        VerifyAfter(VerifyAfter), PrintAfter(PrintAfter) {}
-
-  Pass *getInsertedPass() const {
-    assert(InsertedPassID.isValid() && "Illegal Pass ID!");
-    if (InsertedPassID.isInstance())
-      return InsertedPassID.getInstance();
-    Pass *NP = Pass::createPass(InsertedPassID.getID());
-    assert(NP && "Pass ID not registered");
-    return NP;
-  }
-};
-}
-
 namespace llvm {
 class PassConfigImpl {
 public:
@@ -226,7 +202,7 @@ public:
 
   /// Store the pairs of <AnalysisID, AnalysisID> of which the second pass
   /// is inserted after each instance of the first one.
-  SmallVector<InsertedPass, 4> InsertedPasses;
+  SmallVector<std::pair<AnalysisID, IdentifyingPassPtr>, 4> InsertedPasses;
 };
 } // namespace llvm
 
@@ -241,17 +217,13 @@ TargetPassConfig::TargetPassConfig(TargetMachine *tm, PassManagerBase &pm)
     : ImmutablePass(ID), PM(&pm), StartBefore(nullptr), StartAfter(nullptr),
       StopAfter(nullptr), Started(true), Stopped(false),
       AddingMachinePasses(false), TM(tm), Impl(nullptr), Initialized(false),
-      DisableVerify(false), EnableTailMerge(true) { 
+      DisableVerify(false), EnableTailMerge(true), EnableShrinkWrap(false) {
 
   Impl = new PassConfigImpl();
 
   // Register all target independent codegen passes to activate their PassIDs,
   // including this pass itself.
   initializeCodeGen(*PassRegistry::getPassRegistry());
-
-  // Also register alias analysis passes required by codegen passes.
-  initializeBasicAAWrapperPassPass(*PassRegistry::getPassRegistry());
-  initializeAAResultsWrapperPassPass(*PassRegistry::getPassRegistry());
 
   // Substitute Pseudo Pass IDs for real ones.
   substitutePass(&EarlyTailDuplicateID, &TailDuplicateID);
@@ -260,15 +232,14 @@ TargetPassConfig::TargetPassConfig(TargetMachine *tm, PassManagerBase &pm)
 
 /// Insert InsertedPassID pass after TargetPassID.
 void TargetPassConfig::insertPass(AnalysisID TargetPassID,
-                                  IdentifyingPassPtr InsertedPassID,
-                                  bool VerifyAfter, bool PrintAfter) {
+                                  IdentifyingPassPtr InsertedPassID) {
   assert(((!InsertedPassID.isInstance() &&
            TargetPassID != InsertedPassID.getID()) ||
           (InsertedPassID.isInstance() &&
            TargetPassID != InsertedPassID.getInstance()->getPassID())) &&
          "Insert a pass after itself!");
-  Impl->InsertedPasses.emplace_back(TargetPassID, InsertedPassID, VerifyAfter,
-                                    PrintAfter);
+  std::pair<AnalysisID, IdentifyingPassPtr> P(TargetPassID, InsertedPassID);
+  Impl->InsertedPasses.push_back(P);
 }
 
 /// createPassConfig - Create a pass configuration object to be used by
@@ -333,9 +304,21 @@ void TargetPassConfig::addPass(Pass *P, bool verifyAfter, bool printAfter) {
     }
 
     // Add the passes after the pass P if there is any.
-    for (auto IP : Impl->InsertedPasses) {
-      if (IP.TargetPassID == PassID)
-        addPass(IP.getInsertedPass(), IP.VerifyAfter, IP.PrintAfter);
+    for (SmallVectorImpl<std::pair<AnalysisID, IdentifyingPassPtr> >::iterator
+             I = Impl->InsertedPasses.begin(),
+             E = Impl->InsertedPasses.end();
+         I != E; ++I) {
+      if ((*I).first == PassID) {
+        assert((*I).second.isValid() && "Illegal Pass ID!");
+        Pass *NP;
+        if ((*I).second.isInstance())
+          NP = (*I).second.getInstance();
+        else {
+          NP = Pass::createPass((*I).second.getID());
+          assert(NP && "Pass ID not registered");
+        }
+        addPass(NP, false, false);
+      }
     }
   } else {
     delete P;
@@ -397,10 +380,10 @@ void TargetPassConfig::addIRPasses() {
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
   if (UseCFLAA)
-    addPass(createCFLAAWrapperPass());
-  addPass(createTypeBasedAAWrapperPass());
-  addPass(createScopedNoAliasAAWrapperPass());
-  addPass(createBasicAAWrapperPass());
+    addPass(createCFLAliasAnalysisPass());
+  addPass(createTypeBasedAliasAnalysisPass());
+  addPass(createScopedNoAliasAAPass());
+  addPass(createBasicAliasAnalysisPass());
 
   // Before running any passes, run the verifier to determine if the input
   // coming from the front-end and/or optimizer is valid.
@@ -478,7 +461,7 @@ void TargetPassConfig::addISelPrepare() {
 
   // Add both the safe stack and the stack protection passes: each of them will
   // only protect functions that have corresponding attributes.
-  addPass(createSafeStackPass(TM));
+  addPass(createSafeStackPass());
   addPass(createStackProtectorPass(TM));
 
   if (PrintISelInput)
@@ -556,9 +539,8 @@ void TargetPassConfig::addMachinePasses() {
   addPostRegAlloc();
 
   // Insert prolog/epilog code.  Eliminate abstract frame index references...
-  if (getOptLevel() != CodeGenOpt::None) 
+  if (getEnableShrinkWrap())
     addPass(&ShrinkWrapID);
-
   addPass(&PrologEpilogCodeInserterID);
 
   /// Add passes that optimize machine instructions after register allocation.
@@ -575,10 +557,7 @@ void TargetPassConfig::addMachinePasses() {
     addPass(&ImplicitNullChecksID);
 
   // Second pass scheduler.
-  // Let Target optionally insert this pass by itself at some other
-  // point.
-  if (getOptLevel() != CodeGenOpt::None &&
-      !TM->targetSchedulesPostRAScheduling()) {
+  if (getOptLevel() != CodeGenOpt::None) {
     if (MISchedPostRA)
       addPass(&PostMachineSchedulerID);
     else
@@ -597,10 +576,7 @@ void TargetPassConfig::addMachinePasses() {
 
   addPreEmitPass();
 
-  addPass(&FuncletLayoutID, false);
-
   addPass(&StackMapLivenessID, false);
-  addPass(&LiveDebugValuesID, false);
 
   AddingMachinePasses = false;
 }
@@ -637,10 +613,25 @@ void TargetPassConfig::addMachineSSAOptimization() {
   addPass(&MachineCSEID, false);
   addPass(&MachineSinkingID);
 
-  addPass(&PeepholeOptimizerID);
+  addPass(&PeepholeOptimizerID, false);
   // Clean-up the dead code that may have been generated by peephole
   // rewriting.
   addPass(&DeadMachineInstructionElimID);
+}
+
+bool TargetPassConfig::getEnableShrinkWrap() const {
+  switch (EnableShrinkWrapOpt) {
+  case cl::BOU_UNSET:
+    return EnableShrinkWrap && getOptLevel() != CodeGenOpt::None;
+  // If EnableShrinkWrap is set, it takes precedence on whatever the
+  // target sets. The rational is that we assume we want to test
+  // something related to shrink-wrapping.
+  case cl::BOU_TRUE:
+    return true;
+  case cl::BOU_FALSE:
+    return false;
+  }
+  llvm_unreachable("Invalid shrink-wrapping state");
 }
 
 //===---------------------------------------------------------------------===//
@@ -726,8 +717,7 @@ void TargetPassConfig::addFastRegAlloc(FunctionPass *RegAllocPass) {
   addPass(&PHIEliminationID, false);
   addPass(&TwoAddressInstructionPassID, false);
 
-  if (RegAllocPass)
-    addPass(RegAllocPass);
+  addPass(RegAllocPass);
 }
 
 /// Add standard target-independent passes that are tightly coupled with
@@ -758,27 +748,25 @@ void TargetPassConfig::addOptimizedRegAlloc(FunctionPass *RegAllocPass) {
   // PreRA instruction scheduling.
   addPass(&MachineSchedulerID);
 
-  if (RegAllocPass) {
-    // Add the selected register allocation pass.
-    addPass(RegAllocPass);
+  // Add the selected register allocation pass.
+  addPass(RegAllocPass);
 
-    // Allow targets to change the register assignments before rewriting.
-    addPreRewrite();
+  // Allow targets to change the register assignments before rewriting.
+  addPreRewrite();
 
-    // Finally rewrite virtual registers.
-    addPass(&VirtRegRewriterID);
+  // Finally rewrite virtual registers.
+  addPass(&VirtRegRewriterID);
 
-    // Perform stack slot coloring and post-ra machine LICM.
-    //
-    // FIXME: Re-enable coloring with register when it's capable of adding
-    // kill markers.
-    addPass(&StackSlotColoringID);
+  // Perform stack slot coloring and post-ra machine LICM.
+  //
+  // FIXME: Re-enable coloring with register when it's capable of adding
+  // kill markers.
+  addPass(&StackSlotColoringID);
 
-    // Run post-ra machine LICM to hoist reloads / remats.
-    //
-    // FIXME: can this move into MachineLateOptimization?
-    addPass(&PostRAMachineLICMID);
-  }
+  // Run post-ra machine LICM to hoist reloads / remats.
+  //
+  // FIXME: can this move into MachineLateOptimization?
+  addPass(&PostRAMachineLICMID);
 }
 
 //===---------------------------------------------------------------------===//

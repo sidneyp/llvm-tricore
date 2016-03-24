@@ -162,14 +162,13 @@ MemoryBuffer::getNewMemBuffer(size_t Size, StringRef BufferName) {
 }
 
 ErrorOr<std::unique_ptr<MemoryBuffer>>
-MemoryBuffer::getFileOrSTDIN(const Twine &Filename, int64_t FileSize,
-                             bool RequiresNullTerminator) {
+MemoryBuffer::getFileOrSTDIN(const Twine &Filename, int64_t FileSize) {
   SmallString<256> NameBuf;
   StringRef NameRef = Filename.toStringRef(NameBuf);
 
   if (NameRef == "-")
     return getSTDIN();
-  return getFile(Filename, FileSize, RequiresNullTerminator);
+  return getFile(Filename, FileSize);
 }
 
 ErrorOr<std::unique_ptr<MemoryBuffer>>

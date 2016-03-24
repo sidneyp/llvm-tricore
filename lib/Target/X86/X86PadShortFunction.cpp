@@ -93,7 +93,8 @@ FunctionPass *llvm::createX86PadShortFunctions() {
 /// runOnMachineFunction - Loop over all of the basic blocks, inserting
 /// NOOP instructions before early exits.
 bool PadShortFunc::runOnMachineFunction(MachineFunction &MF) {
-  if (MF.getFunction()->optForSize()) {
+  if (MF.getFunction()->hasFnAttribute(Attribute::OptimizeForSize) ||
+      MF.getFunction()->hasFnAttribute(Attribute::MinSize)) {
     return false;
   }
 
@@ -106,7 +107,7 @@ bool PadShortFunc::runOnMachineFunction(MachineFunction &MF) {
   // Search through basic blocks and mark the ones that have early returns
   ReturnBBs.clear();
   VisitedBBs.clear();
-  findReturns(&MF.front());
+  findReturns(MF.begin());
 
   bool MadeChange = false;
 

@@ -34,32 +34,32 @@
 
 using namespace llvm;
 
-NewArchiveIterator::NewArchiveIterator(const object::Archive::Child &OldMember,
+NewArchiveIterator::NewArchiveIterator(object::Archive::child_iterator I,
                                        StringRef Name)
-    : IsNewMember(false), Name(Name), OldMember(OldMember) {}
+    : IsNewMember(false), Name(Name), OldI(I) {}
 
-NewArchiveIterator::NewArchiveIterator(StringRef FileName)
-    : IsNewMember(true), Name(FileName), OldMember(nullptr, nullptr, nullptr) {}
+NewArchiveIterator::NewArchiveIterator(StringRef NewFilename, StringRef Name)
+    : IsNewMember(true), Name(Name), NewFilename(NewFilename) {}
 
 StringRef NewArchiveIterator::getName() const { return Name; }
 
 bool NewArchiveIterator::isNewMember() const { return IsNewMember; }
 
-const object::Archive::Child &NewArchiveIterator::getOld() const {
+object::Archive::child_iterator NewArchiveIterator::getOld() const {
   assert(!IsNewMember);
-  return OldMember;
+  return OldI;
 }
 
 StringRef NewArchiveIterator::getNew() const {
   assert(IsNewMember);
-  return Name;
+  return NewFilename;
 }
 
 llvm::ErrorOr<int>
 NewArchiveIterator::getFD(sys::fs::file_status &NewStatus) const {
   assert(IsNewMember);
   int NewFD;
-  if (auto EC = sys::fs::openFileForRead(Name, NewFD))
+  if (auto EC = sys::fs::openFileForRead(NewFilename, NewFD))
     return EC;
   assert(NewFD != -1);
 
@@ -77,7 +77,7 @@ NewArchiveIterator::getFD(sys::fs::file_status &NewStatus) const {
 
 template <typename T>
 static void printWithSpacePadding(raw_fd_ostream &OS, T Data, unsigned Size,
-                                  bool MayTruncate = false) {
+				  bool MayTruncate = false) {
   uint64_t OldPos = OS.tell();
   OS << Data;
   unsigned SizeSoFar = OS.tell() - OldPos;
@@ -135,56 +135,30 @@ static void printBSDMemberHeader(raw_fd_ostream &Out, StringRef Name,
     Out.write(uint8_t(0));
 }
 
-static bool useStringTable(bool Thin, StringRef Name) {
-  return Thin || Name.size() >= 16;
-}
-
 static void
-printMemberHeader(raw_fd_ostream &Out, object::Archive::Kind Kind, bool Thin,
+printMemberHeader(raw_fd_ostream &Out, object::Archive::Kind Kind,
                   StringRef Name,
                   std::vector<unsigned>::iterator &StringMapIndexIter,
                   const sys::TimeValue &ModTime, unsigned UID, unsigned GID,
                   unsigned Perms, unsigned Size) {
   if (Kind == object::Archive::K_BSD)
     return printBSDMemberHeader(Out, Name, ModTime, UID, GID, Perms, Size);
-  if (!useStringTable(Thin, Name))
+  if (Name.size() < 16)
     return printGNUSmallMemberHeader(Out, Name, ModTime, UID, GID, Perms, Size);
   Out << '/';
   printWithSpacePadding(Out, *StringMapIndexIter++, 15);
   printRestOfMemberHeader(Out, ModTime, UID, GID, Perms, Size);
 }
 
-// Compute the relative path from From to To.
-static std::string computeRelativePath(StringRef From, StringRef To) {
-  if (sys::path::is_absolute(From) || sys::path::is_absolute(To))
-    return To;
-
-  StringRef DirFrom = sys::path::parent_path(From);
-  auto FromI = sys::path::begin(DirFrom);
-  auto ToI = sys::path::begin(To);
-  while (*FromI == *ToI) {
-    ++FromI;
-    ++ToI;
-  }
-
-  SmallString<128> Relative;
-  for (auto FromE = sys::path::end(DirFrom); FromI != FromE; ++FromI)
-    sys::path::append(Relative, "..");
-
-  for (auto ToE = sys::path::end(To); ToI != ToE; ++ToI)
-    sys::path::append(Relative, *ToI);
-
-  return Relative.str();
-}
-
-static void writeStringTable(raw_fd_ostream &Out, StringRef ArcName,
+static void writeStringTable(raw_fd_ostream &Out,
                              ArrayRef<NewArchiveIterator> Members,
-                             std::vector<unsigned> &StringMapIndexes,
-                             bool Thin) {
+                             std::vector<unsigned> &StringMapIndexes) {
   unsigned StartOffset = 0;
-  for (const NewArchiveIterator &I : Members) {
-    StringRef Name = sys::path::filename(I.getName());
-    if (!useStringTable(Thin, Name))
+  for (ArrayRef<NewArchiveIterator>::iterator I = Members.begin(),
+                                              E = Members.end();
+       I != E; ++I) {
+    StringRef Name = I->getName();
+    if (Name.size() < 16)
       continue;
     if (StartOffset == 0) {
       printWithSpacePadding(Out, "//", 58);
@@ -192,13 +166,7 @@ static void writeStringTable(raw_fd_ostream &Out, StringRef ArcName,
       StartOffset = Out.tell();
     }
     StringMapIndexes.push_back(Out.tell() - StartOffset);
-
-    if (Thin)
-      Out << computeRelativePath(ArcName, I.getName());
-    else
-      Out << Name;
-
-    Out << "/\n";
+    Out << Name << "/\n";
   }
   if (StartOffset == 0)
     return;
@@ -300,11 +268,9 @@ writeSymbolTable(raw_fd_ostream &Out, object::Archive::Kind Kind,
   return BodyStartOffset + 4;
 }
 
-std::pair<StringRef, std::error_code>
-llvm::writeArchive(StringRef ArcName,
-                   std::vector<NewArchiveIterator> &NewMembers,
-                   bool WriteSymtab, object::Archive::Kind Kind,
-                   bool Deterministic, bool Thin) {
+std::pair<StringRef, std::error_code> llvm::writeArchive(
+    StringRef ArcName, std::vector<NewArchiveIterator> &NewMembers,
+    bool WriteSymtab, object::Archive::Kind Kind, bool Deterministic) {
   SmallString<128> TmpArchive;
   int TmpArchiveFD;
   if (auto EC = sys::fs::createUniqueFile(ArcName + ".temp-archive-%%%%%%%.a",
@@ -313,10 +279,7 @@ llvm::writeArchive(StringRef ArcName,
 
   tool_output_file Output(TmpArchive, TmpArchiveFD);
   raw_fd_ostream &Out = Output.os();
-  if (Thin)
-    Out << "!<thin>\n";
-  else
-    Out << "!<arch>\n";
+  Out << "!<arch>\n";
 
   std::vector<unsigned> MemberOffsetRefs;
 
@@ -346,11 +309,9 @@ llvm::writeArchive(StringRef ArcName,
       Buffers.push_back(std::move(MemberBufferOrErr.get()));
       MemberRef = Buffers.back()->getMemBufferRef();
     } else {
-      const object::Archive::Child &OldMember = Member.getOld();
-      assert((!Thin || OldMember.getParent()->isThin()) &&
-             "Thin archives cannot refers to member of other archives");
+      object::Archive::child_iterator OldMember = Member.getOld();
       ErrorOr<MemoryBufferRef> MemberBufferOrErr =
-          OldMember.getMemoryBufferRef();
+          OldMember->getMemoryBufferRef();
       if (auto EC = MemberBufferOrErr.getError())
         return std::make_pair("", EC);
       MemberRef = MemberBufferOrErr.get();
@@ -369,7 +330,7 @@ llvm::writeArchive(StringRef ArcName,
 
   std::vector<unsigned> StringMapIndexes;
   if (Kind != object::Archive::K_BSD)
-    writeStringTable(Out, ArcName, NewMembers, StringMapIndexes, Thin);
+    writeStringTable(Out, NewMembers, StringMapIndexes);
 
   unsigned MemberNum = 0;
   unsigned NewMemberNum = 0;
@@ -397,32 +358,26 @@ llvm::writeArchive(StringRef ArcName,
       GID = Status.getGroup();
       Perms = Status.permissions();
     } else {
-      const object::Archive::Child &OldMember = I.getOld();
-      ModTime = OldMember.getLastModified();
-      UID = OldMember.getUID();
-      GID = OldMember.getGID();
-      Perms = OldMember.getAccessMode();
+      object::Archive::child_iterator OldMember = I.getOld();
+      ModTime = OldMember->getLastModified();
+      UID = OldMember->getUID();
+      GID = OldMember->getGID();
+      Perms = OldMember->getAccessMode();
     }
 
     if (I.isNewMember()) {
       StringRef FileName = I.getNew();
       const sys::fs::file_status &Status = NewMemberStatus[NewMemberNum++];
-      printMemberHeader(Out, Kind, Thin, sys::path::filename(FileName),
+      printMemberHeader(Out, Kind, sys::path::filename(FileName),
                         StringMapIndexIter, ModTime, UID, GID, Perms,
                         Status.getSize());
     } else {
-      const object::Archive::Child &OldMember = I.getOld();
-      ErrorOr<uint32_t> Size = OldMember.getSize();
-      if (std::error_code EC = Size.getError())
-        return std::make_pair("", EC);
-      StringRef FileName = I.getName();
-      printMemberHeader(Out, Kind, Thin, sys::path::filename(FileName),
-                        StringMapIndexIter, ModTime, UID, GID, Perms,
-                        Size.get());
+      object::Archive::child_iterator OldMember = I.getOld();
+      printMemberHeader(Out, Kind, I.getName(), StringMapIndexIter, ModTime,
+                        UID, GID, Perms, OldMember->getSize());
     }
 
-    if (!Thin)
-      Out << File.getBuffer();
+    Out << File.getBuffer();
 
     if (Out.tell() % 2)
       Out << '\n';

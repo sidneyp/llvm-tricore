@@ -24,9 +24,15 @@ using namespace llvm;
 #define DEBUG_TYPE "subtarget-emitter"
 
 #ifndef NDEBUG
-static void dumpIdxVec(ArrayRef<unsigned> V) {
-  for (unsigned Idx : V)
-    dbgs() << Idx << ", ";
+static void dumpIdxVec(const IdxVec &V) {
+  for (unsigned i = 0, e = V.size(); i < e; ++i) {
+    dbgs() << V[i] << ", ";
+  }
+}
+static void dumpIdxVec(const SmallVectorImpl<unsigned> &V) {
+  for (unsigned i = 0, e = V.size(); i < e; ++i) {
+    dbgs() << V[i] << ", ";
+  }
 }
 #endif
 
@@ -320,9 +326,9 @@ void CodeGenSchedModels::collectSchedRW() {
 }
 
 /// Compute a SchedWrite name from a sequence of writes.
-std::string CodeGenSchedModels::genRWName(ArrayRef<unsigned> Seq, bool IsRead) {
+std::string CodeGenSchedModels::genRWName(const IdxVec& Seq, bool IsRead) {
   std::string Name("(");
-  for (auto I = Seq.begin(), E = Seq.end(); I != E; ++I) {
+  for (IdxIter I = Seq.begin(), E = Seq.end(); I != E; ++I) {
     if (I != Seq.begin())
       Name += '_';
     Name += getSchedRW(*I, IsRead).Name;
@@ -451,13 +457,13 @@ void CodeGenSchedModels::expandRWSeqForProc(
 }
 
 // Find the existing SchedWrite that models this sequence of writes.
-unsigned CodeGenSchedModels::findRWForSequence(ArrayRef<unsigned> Seq,
+unsigned CodeGenSchedModels::findRWForSequence(const IdxVec &Seq,
                                                bool IsRead) {
   std::vector<CodeGenSchedRW> &RWVec = IsRead ? SchedReads : SchedWrites;
 
   for (std::vector<CodeGenSchedRW>::iterator I = RWVec.begin(), E = RWVec.end();
        I != E; ++I) {
-    if (makeArrayRef(I->Sequence) == Seq)
+    if (I->Sequence == Seq)
       return I - RWVec.begin();
   }
   // Index zero reserved for invalid RW.
@@ -579,11 +585,11 @@ void CodeGenSchedModels::collectSchedClasses() {
 /// Find an SchedClass that has been inferred from a per-operand list of
 /// SchedWrites and SchedReads.
 unsigned CodeGenSchedModels::findSchedClassIdx(Record *ItinClassDef,
-                                               ArrayRef<unsigned> Writes,
-                                               ArrayRef<unsigned> Reads) const {
+                                               const IdxVec &Writes,
+                                               const IdxVec &Reads) const {
   for (SchedClassIter I = schedClassBegin(), E = schedClassEnd(); I != E; ++I) {
-    if (I->ItinClassDef == ItinClassDef && makeArrayRef(I->Writes) == Writes &&
-        makeArrayRef(I->Reads) == Reads) {
+    if (I->ItinClassDef == ItinClassDef
+        && I->Writes == Writes && I->Reads == Reads) {
       return I - schedClassBegin();
     }
   }
@@ -597,22 +603,20 @@ unsigned CodeGenSchedModels::getSchedClassIdx(
   return InstrClassMap.lookup(Inst.TheDef);
 }
 
-std::string
-CodeGenSchedModels::createSchedClassName(Record *ItinClassDef,
-                                         ArrayRef<unsigned> OperWrites,
-                                         ArrayRef<unsigned> OperReads) {
+std::string CodeGenSchedModels::createSchedClassName(
+  Record *ItinClassDef, const IdxVec &OperWrites, const IdxVec &OperReads) {
 
   std::string Name;
   if (ItinClassDef && ItinClassDef->getName() != "NoItinerary")
     Name = ItinClassDef->getName();
-  for (unsigned Idx : OperWrites) {
+  for (IdxIter WI = OperWrites.begin(), WE = OperWrites.end(); WI != WE; ++WI) {
     if (!Name.empty())
       Name += '_';
-    Name += SchedWrites[Idx].Name;
+    Name += SchedWrites[*WI].Name;
   }
-  for (unsigned Idx : OperReads) {
+  for (IdxIter RI = OperReads.begin(), RE = OperReads.end(); RI != RE; ++RI) {
     Name += '_';
-    Name += SchedReads[Idx].Name;
+    Name += SchedReads[*RI].Name;
   }
   return Name;
 }
@@ -632,9 +636,10 @@ std::string CodeGenSchedModels::createSchedClassName(const RecVec &InstDefs) {
 /// SchedWrites and SchedReads. ProcIndices contains the set of IDs of
 /// processors that may utilize this class.
 unsigned CodeGenSchedModels::addSchedClass(Record *ItinClassDef,
-                                           ArrayRef<unsigned> OperWrites,
-                                           ArrayRef<unsigned> OperReads,
-                                           ArrayRef<unsigned> ProcIndices) {
+                                           const IdxVec &OperWrites,
+                                           const IdxVec &OperReads,
+                                           const IdxVec &ProcIndices)
+{
   assert(!ProcIndices.empty() && "expect at least one ProcIdx");
 
   unsigned Idx = findSchedClassIdx(ItinClassDef, OperWrites, OperReads);
@@ -1317,10 +1322,10 @@ static void inferFromTransitions(ArrayRef<PredTransition> LastTransitions,
 // Create new SchedClasses for the given ReadWrite list. If any of the
 // ReadWrites refers to a SchedVariant, create a new SchedClass for each variant
 // of the ReadWrite list, following Aliases if necessary.
-void CodeGenSchedModels::inferFromRW(ArrayRef<unsigned> OperWrites,
-                                     ArrayRef<unsigned> OperReads,
+void CodeGenSchedModels::inferFromRW(const IdxVec &OperWrites,
+                                     const IdxVec &OperReads,
                                      unsigned FromClassIdx,
-                                     ArrayRef<unsigned> ProcIndices) {
+                                     const IdxVec &ProcIndices) {
   DEBUG(dbgs() << "INFER RW proc("; dumpIdxVec(ProcIndices); dbgs() << ") ");
 
   // Create a seed transition with an empty PredTerm and the expanded sequences
@@ -1330,9 +1335,9 @@ void CodeGenSchedModels::inferFromRW(ArrayRef<unsigned> OperWrites,
   LastTransitions.back().ProcIndices.append(ProcIndices.begin(),
                                             ProcIndices.end());
 
-  for (unsigned WriteIdx : OperWrites) {
+  for (IdxIter I = OperWrites.begin(), E = OperWrites.end(); I != E; ++I) {
     IdxVec WriteSeq;
-    expandRWSequence(WriteIdx, WriteSeq, /*IsRead=*/false);
+    expandRWSequence(*I, WriteSeq, /*IsRead=*/false);
     unsigned Idx = LastTransitions[0].WriteSequences.size();
     LastTransitions[0].WriteSequences.resize(Idx + 1);
     SmallVectorImpl<unsigned> &Seq = LastTransitions[0].WriteSequences[Idx];
@@ -1341,9 +1346,9 @@ void CodeGenSchedModels::inferFromRW(ArrayRef<unsigned> OperWrites,
     DEBUG(dbgs() << "("; dumpIdxVec(Seq); dbgs() << ") ");
   }
   DEBUG(dbgs() << " Reads: ");
-  for (unsigned ReadIdx : OperReads) {
+  for (IdxIter I = OperReads.begin(), E = OperReads.end(); I != E; ++I) {
     IdxVec ReadSeq;
-    expandRWSequence(ReadIdx, ReadSeq, /*IsRead=*/true);
+    expandRWSequence(*I, ReadSeq, /*IsRead=*/true);
     unsigned Idx = LastTransitions[0].ReadSequences.size();
     LastTransitions[0].ReadSequences.resize(Idx + 1);
     SmallVectorImpl<unsigned> &Seq = LastTransitions[0].ReadSequences[Idx];
@@ -1547,16 +1552,20 @@ void CodeGenSchedModels::collectItinProcResources(Record *ItinClassDef) {
 }
 
 void CodeGenSchedModels::collectRWResources(unsigned RWIdx, bool IsRead,
-                                            ArrayRef<unsigned> ProcIndices) {
+                                            const IdxVec &ProcIndices) {
   const CodeGenSchedRW &SchedRW = getSchedRW(RWIdx, IsRead);
   if (SchedRW.TheDef) {
     if (!IsRead && SchedRW.TheDef->isSubClassOf("SchedWriteRes")) {
-      for (unsigned Idx : ProcIndices)
-        addWriteRes(SchedRW.TheDef, Idx);
+      for (IdxIter PI = ProcIndices.begin(), PE = ProcIndices.end();
+           PI != PE; ++PI) {
+        addWriteRes(SchedRW.TheDef, *PI);
+      }
     }
     else if (IsRead && SchedRW.TheDef->isSubClassOf("SchedReadAdvance")) {
-      for (unsigned Idx : ProcIndices)
-        addReadAdvance(SchedRW.TheDef, Idx);
+      for (IdxIter PI = ProcIndices.begin(), PE = ProcIndices.end();
+           PI != PE; ++PI) {
+        addReadAdvance(SchedRW.TheDef, *PI);
+      }
     }
   }
   for (RecIter AI = SchedRW.Aliases.begin(), AE = SchedRW.Aliases.end();
@@ -1581,15 +1590,15 @@ void CodeGenSchedModels::collectRWResources(unsigned RWIdx, bool IsRead,
 }
 
 // Collect resources for a set of read/write types and processor indices.
-void CodeGenSchedModels::collectRWResources(ArrayRef<unsigned> Writes,
-                                            ArrayRef<unsigned> Reads,
-                                            ArrayRef<unsigned> ProcIndices) {
+void CodeGenSchedModels::collectRWResources(const IdxVec &Writes,
+                                            const IdxVec &Reads,
+                                            const IdxVec &ProcIndices) {
 
-  for (unsigned Idx : Writes)
-    collectRWResources(Idx, /*IsRead=*/false, ProcIndices);
+  for (IdxIter WI = Writes.begin(), WE = Writes.end(); WI != WE; ++WI)
+    collectRWResources(*WI, /*IsRead=*/false, ProcIndices);
 
-  for (unsigned Idx : Reads)
-    collectRWResources(Idx, /*IsRead=*/true, ProcIndices);
+  for (IdxIter RI = Reads.begin(), RE = Reads.end(); RI != RE; ++RI)
+    collectRWResources(*RI, /*IsRead=*/true, ProcIndices);
 }
 
 

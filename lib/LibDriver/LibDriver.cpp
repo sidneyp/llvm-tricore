@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Defines an interface to a lib.exe-compatible driver that also understands
-// bitcode files. Used by llvm-lib and lld-link /lib.
+// bitcode files. Used by llvm-lib and lld-link2 /lib.
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,7 +51,7 @@ static const llvm::opt::OptTable::Info infoTable[] = {
 
 class LibOptTable : public llvm::opt::OptTable {
 public:
-  LibOptTable() : OptTable(infoTable, true) {}
+  LibOptTable() : OptTable(infoTable, llvm::array_lengthof(infoTable), true) {}
 };
 
 }
@@ -102,7 +102,7 @@ static Optional<std::string> findInputFile(StringRef File,
 int llvm::libDriverMain(llvm::ArrayRef<const char*> ArgsArr) {
   SmallVector<const char *, 20> NewArgs(ArgsArr.begin(), ArgsArr.end());
   BumpPtrAllocator Alloc;
-  StringSaver Saver(Alloc);
+  BumpPtrStringSaver Saver(Alloc);
   cl::ExpandResponseFiles(Saver, cl::TokenizeWindowsCommandLine, NewArgs);
   ArgsArr = NewArgs;
 
@@ -135,13 +135,14 @@ int llvm::libDriverMain(llvm::ArrayRef<const char*> ArgsArr) {
       llvm::errs() << Arg->getValue() << ": no such file or directory\n";
       return 1;
     }
-    Members.emplace_back(Saver.save(*Path));
+    Members.emplace_back(Saver.save(*Path),
+                         llvm::sys::path::filename(Arg->getValue()));
   }
 
   std::pair<StringRef, std::error_code> Result =
       llvm::writeArchive(getOutputPath(&Args, Members[0]), Members,
                          /*WriteSymtab=*/true, object::Archive::K_GNU,
-                         /*Deterministic*/ true, Args.hasArg(OPT_llvmlibthin));
+                         /*Deterministic*/ true);
 
   if (Result.second) {
     if (Result.first.empty())

@@ -150,9 +150,22 @@ void TargetMachine::setOptLevel(CodeGenOpt::Level Level) const {
 }
 
 TargetIRAnalysis TargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
+  return TargetIRAnalysis([this](Function &F) {
     return TargetTransformInfo(F.getParent()->getDataLayout());
   });
+}
+
+static bool canUsePrivateLabel(const MCAsmInfo &AsmInfo,
+                               const MCSection &Section) {
+  if (!AsmInfo.isSectionAtomizableBySymbols(Section))
+    return true;
+
+  // If it is not dead stripped, it is safe to use private labels.
+  const MCSectionMachO &SMO = cast<MCSectionMachO>(Section);
+  if (SMO.hasAttribute(MachO::S_ATTR_NO_DEAD_STRIP))
+    return true;
+
+  return false;
 }
 
 void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
@@ -164,8 +177,11 @@ void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
     Mang.getNameWithPrefix(Name, GV, false);
     return;
   }
+  SectionKind GVKind = TargetLoweringObjectFile::getKindForGlobal(GV, *this);
   const TargetLoweringObjectFile *TLOF = getObjFileLowering();
-  TLOF->getNameWithPrefix(Name, GV, Mang, *this);
+  const MCSection *TheSection = TLOF->SectionForGlobal(GV, GVKind, Mang, *this);
+  bool CannotUsePrivateLabel = !canUsePrivateLabel(*AsmInfo, *TheSection);
+  TLOF->getNameWithPrefix(Name, GV, CannotUsePrivateLabel, Mang, *this);
 }
 
 MCSymbol *TargetMachine::getSymbol(const GlobalValue *GV, Mangler &Mang) const {

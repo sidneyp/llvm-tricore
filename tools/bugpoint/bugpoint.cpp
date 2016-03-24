@@ -126,6 +126,7 @@ int main(int argc, char **argv) {
   initializeVectorization(Registry);
   initializeIPO(Registry);
   initializeAnalysis(Registry);
+  initializeIPA(Registry);
   initializeTransformUtils(Registry);
   initializeInstCombine(Registry);
   initializeInstrumentation(Registry);
@@ -180,12 +181,19 @@ int main(int argc, char **argv) {
       Builder.Inliner = createFunctionInliningPass(225);
     else
       Builder.Inliner = createFunctionInliningPass(275);
+
+    // Note that although clang/llvm-gcc use two separate passmanagers
+    // here, it shouldn't normally make a difference.
     Builder.populateFunctionPassManager(PM);
     Builder.populateModulePassManager(PM);
   }
 
-  for (const PassInfo *PI : PassList)
+  for (std::vector<const PassInfo*>::iterator I = PassList.begin(),
+         E = PassList.end();
+       I != E; ++I) {
+    const PassInfo* PI = *I;
     D.addPass(PI->getPassArgument());
+  }
 
   // Bugpoint has the ability of generating a plethora of core files, so to
   // avoid filling up the disk, we prevent it

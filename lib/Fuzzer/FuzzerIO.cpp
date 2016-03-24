@@ -15,15 +15,13 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <cstdarg>
 #include <cstdio>
 
 namespace fuzzer {
 
 static long GetEpoch(const std::string &Path) {
   struct stat St;
-  if (stat(Path.c_str(), &St))
-    return 0;  // Can't stat, be conservative.
+  if (stat(Path.c_str(), &St)) return 0;
   return St.st_mtime;
 }
 
@@ -31,15 +29,12 @@ static std::vector<std::string> ListFilesInDir(const std::string &Dir,
                                                long *Epoch) {
   std::vector<std::string> V;
   if (Epoch) {
-    auto E = GetEpoch(Dir);
+    auto E = GetEpoch(Dir.c_str());
     if (*Epoch >= E) return V;
     *Epoch = E;
   }
   DIR *D = opendir(Dir.c_str());
-  if (!D) {
-    Printf("No such directory: %s; exiting\n", Dir.c_str());
-    exit(1);
-  }
+  if (!D) return V;
   while (auto E = readdir(D)) {
     if (E->d_type == DT_REG || E->d_type == DT_LNK)
       V.push_back(E->d_name);
@@ -50,10 +45,6 @@ static std::vector<std::string> ListFilesInDir(const std::string &Dir,
 
 Unit FileToVector(const std::string &Path) {
   std::ifstream T(Path);
-  if (!T) {
-    Printf("No such directory: %s; exiting\n", Path.c_str());
-    exit(1);
-  }
   return Unit((std::istreambuf_iterator<char>(T)),
               std::istreambuf_iterator<char>());
 }
@@ -69,11 +60,8 @@ void CopyFileToErr(const std::string &Path) {
 }
 
 void WriteToFile(const Unit &U, const std::string &Path) {
-  // Use raw C interface because this function may be called from a sig handler.
-  FILE *Out = fopen(Path.c_str(), "w");
-  if (!Out) return;
-  fwrite(U.data(), sizeof(U[0]), U.size(), Out);
-  fclose(Out);
+  std::ofstream OF(Path);
+  OF.write((const char*)U.data(), U.size());
 }
 
 void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V,
@@ -89,6 +77,11 @@ void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V,
 std::string DirPlusFile(const std::string &DirPath,
                         const std::string &FileName) {
   return DirPath + "/" + FileName;
+}
+
+void PrintFileAsBase64(const std::string &Path) {
+  std::string Cmd = "base64 -w 0 < " + Path + "; echo";
+  ExecuteCommand(Cmd);
 }
 
 void Printf(const char *Fmt, ...) {

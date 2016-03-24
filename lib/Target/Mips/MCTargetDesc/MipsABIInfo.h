@@ -47,10 +47,10 @@ public:
   ABI GetEnumValue() const { return ThisABI; }
 
   /// The registers to use for byval arguments.
-  ArrayRef<MCPhysReg> GetByValArgRegs() const;
+  const ArrayRef<MCPhysReg> GetByValArgRegs() const;
 
   /// The registers to use for the variable argument list.
-  ArrayRef<MCPhysReg> GetVarArgRegs() const;
+  const ArrayRef<MCPhysReg> GetVarArgRegs() const;
 
   /// Obtain the size of the area allocated by the callee for arguments.
   /// CallingConv::FastCall affects the value for O32.
@@ -67,12 +67,9 @@ public:
   unsigned GetFramePtr() const;
   unsigned GetBasePtr() const;
   unsigned GetNullPtr() const;
-  unsigned GetZeroReg() const;
   unsigned GetPtrAdduOp() const;
   unsigned GetPtrAddiuOp() const;
-  unsigned GetGPRMoveOp() const;
   inline bool ArePtrs64bit() const { return IsN64(); }
-  inline bool AreGprs64bit() const { return IsN32() || IsN64(); }
 
   unsigned GetEhDataReg(unsigned I) const;
 };

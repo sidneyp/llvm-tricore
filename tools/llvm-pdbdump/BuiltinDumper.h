@@ -23,8 +23,6 @@ public:
   void start(const PDBSymbolTypeBuiltin &Symbol);
 
 private:
-  StringRef getTypeName(const PDBSymbolTypeBuiltin &Symbol);
-
   LinePrinter &Printer;
 };
 }

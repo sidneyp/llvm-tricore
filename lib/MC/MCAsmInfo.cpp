@@ -157,9 +157,3 @@ bool MCAsmInfo::isValidUnquotedName(StringRef Name) const {
 
   return true;
 }
-
-bool MCAsmInfo::shouldOmitSectionDirective(StringRef SectionName) const {
-  // FIXME: Does .section .bss/.data/.text work everywhere??
-  return SectionName == ".text" || SectionName == ".data" ||
-        (SectionName == ".bss" && !usesELFSectionDirectiveForBSS());
-}

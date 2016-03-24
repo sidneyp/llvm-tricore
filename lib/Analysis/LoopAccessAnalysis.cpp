@@ -58,12 +58,12 @@ static cl::opt<unsigned> MemoryCheckMergeThreshold(
 /// Maximum SIMD width.
 const unsigned VectorizerParams::MaxVectorWidth = 64;
 
-/// \brief We collect dependences up to this threshold.
-static cl::opt<unsigned>
-    MaxDependences("max-dependences", cl::Hidden,
-                   cl::desc("Maximum number of dependences collected by "
-                            "loop-access analysis (default = 100)"),
-                   cl::init(100));
+/// \brief We collect interesting dependences up to this threshold.
+static cl::opt<unsigned> MaxInterestingDependence(
+    "max-interesting-dependences", cl::Hidden,
+    cl::desc("Maximum number of interesting dependences collected by "
+             "loop-access analysis (default = 100)"),
+    cl::init(100));
 
 bool VectorizerParams::isInterleaveForced() {
   return ::VectorizationInterleave.getNumOccurrences() > 0;
@@ -87,10 +87,11 @@ Value *llvm::stripIntegerCast(Value *V) {
   return V;
 }
 
-const SCEV *llvm::replaceSymbolicStrideSCEV(PredicatedScalarEvolution &PSE,
+const SCEV *llvm::replaceSymbolicStrideSCEV(ScalarEvolution *SE,
                                             const ValueToValueMap &PtrToStride,
                                             Value *Ptr, Value *OrigPtr) {
-  const SCEV *OrigSCEV = PSE.getSCEV(Ptr);
+
+  const SCEV *OrigSCEV = SE->getSCEV(Ptr);
 
   // If there is an entry in the map return the SCEV of the pointer with the
   // symbolic stride replaced by one.
@@ -107,82 +108,36 @@ const SCEV *llvm::replaceSymbolicStrideSCEV(PredicatedScalarEvolution &PSE,
     ValueToValueMap RewriteMap;
     RewriteMap[StrideVal] = One;
 
-    ScalarEvolution *SE = PSE.getSE();
-    const auto *U = cast<SCEVUnknown>(SE->getSCEV(StrideVal));
-    const auto *CT =
-        static_cast<const SCEVConstant *>(SE->getOne(StrideVal->getType()));
-
-    PSE.addPredicate(*SE->getEqualPredicate(U, CT));
-    auto *Expr = PSE.getSCEV(Ptr);
-
-    DEBUG(dbgs() << "LAA: Replacing SCEV: " << *OrigSCEV << " by: " << *Expr
+    const SCEV *ByOne =
+        SCEVParameterRewriter::rewrite(OrigSCEV, *SE, RewriteMap, true);
+    DEBUG(dbgs() << "LAA: Replacing SCEV: " << *OrigSCEV << " by: " << *ByOne
                  << "\n");
-    return Expr;
+    return ByOne;
   }
 
   // Otherwise, just return the SCEV of the original pointer.
-  return OrigSCEV;
+  return SE->getSCEV(Ptr);
 }
 
 void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, bool WritePtr,
                                     unsigned DepSetId, unsigned ASId,
-                                    const ValueToValueMap &Strides,
-                                    PredicatedScalarEvolution &PSE) {
+                                    const ValueToValueMap &Strides) {
   // Get the stride replaced scev.
-  const SCEV *Sc = replaceSymbolicStrideSCEV(PSE, Strides, Ptr);
+  const SCEV *Sc = replaceSymbolicStrideSCEV(SE, Strides, Ptr);
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(Sc);
   assert(AR && "Invalid addrec expression");
-  ScalarEvolution *SE = PSE.getSE();
   const SCEV *Ex = SE->getBackedgeTakenCount(Lp);
-
-  const SCEV *ScStart = AR->getStart();
   const SCEV *ScEnd = AR->evaluateAtIteration(Ex, *SE);
-  const SCEV *Step = AR->getStepRecurrence(*SE);
-
-  // For expressions with negative step, the upper bound is ScStart and the
-  // lower bound is ScEnd.
-  if (const SCEVConstant *CStep = dyn_cast<const SCEVConstant>(Step)) {
-    if (CStep->getValue()->isNegative())
-      std::swap(ScStart, ScEnd);
-  } else {
-    // Fallback case: the step is not constant, but the we can still
-    // get the upper and lower bounds of the interval by using min/max
-    // expressions.
-    ScStart = SE->getUMinExpr(ScStart, ScEnd);
-    ScEnd = SE->getUMaxExpr(AR->getStart(), ScEnd);
-  }
-
-  Pointers.emplace_back(Ptr, ScStart, ScEnd, WritePtr, DepSetId, ASId, Sc);
+  Pointers.emplace_back(Ptr, AR->getStart(), ScEnd, WritePtr, DepSetId, ASId,
+                        Sc);
 }
 
-SmallVector<RuntimePointerChecking::PointerCheck, 4>
-RuntimePointerChecking::generateChecks() const {
-  SmallVector<PointerCheck, 4> Checks;
-
-  for (unsigned I = 0; I < CheckingGroups.size(); ++I) {
-    for (unsigned J = I + 1; J < CheckingGroups.size(); ++J) {
-      const RuntimePointerChecking::CheckingPtrGroup &CGI = CheckingGroups[I];
-      const RuntimePointerChecking::CheckingPtrGroup &CGJ = CheckingGroups[J];
-
-      if (needsChecking(CGI, CGJ))
-        Checks.push_back(std::make_pair(&CGI, &CGJ));
-    }
-  }
-  return Checks;
-}
-
-void RuntimePointerChecking::generateChecks(
-    MemoryDepChecker::DepCandidates &DepCands, bool UseDependencies) {
-  assert(Checks.empty() && "Checks is not empty");
-  groupChecks(DepCands, UseDependencies);
-  Checks = generateChecks();
-}
-
-bool RuntimePointerChecking::needsChecking(const CheckingPtrGroup &M,
-                                           const CheckingPtrGroup &N) const {
+bool RuntimePointerChecking::needsChecking(
+    const CheckingPtrGroup &M, const CheckingPtrGroup &N,
+    const SmallVectorImpl<int> *PtrPartition) const {
   for (unsigned I = 0, EI = M.Members.size(); EI != I; ++I)
     for (unsigned J = 0, EJ = N.Members.size(); EJ != J; ++J)
-      if (needsChecking(M.Members[I], N.Members[J]))
+      if (needsChecking(M.Members[I], N.Members[J], PtrPartition))
         return true;
   return false;
 }
@@ -249,31 +204,8 @@ void RuntimePointerChecking::groupChecks(
 
   CheckingGroups.clear();
 
-  // If we need to check two pointers to the same underlying object
-  // with a non-constant difference, we shouldn't perform any pointer
-  // grouping with those pointers. This is because we can easily get
-  // into cases where the resulting check would return false, even when
-  // the accesses are safe.
-  //
-  // The following example shows this:
-  // for (i = 0; i < 1000; ++i)
-  //   a[5000 + i * m] = a[i] + a[i + 9000]
-  //
-  // Here grouping gives a check of (5000, 5000 + 1000 * m) against
-  // (0, 10000) which is always false. However, if m is 1, there is no
-  // dependence. Not grouping the checks for a[i] and a[i + 9000] allows
-  // us to perform an accurate check in this case.
-  //
-  // The above case requires that we have an UnknownDependence between
-  // accesses to the same underlying object. This cannot happen unless
-  // ShouldRetryWithRuntimeCheck is set, and therefore UseDependencies
-  // is also false. In this case we will use the fallback path and create
-  // separate checking groups for all pointers.
-
   // If we don't have the dependency partitions, construct a new
-  // checking pointer group for each pointer. This is also required
-  // for correctness, because in this case we can have checking between
-  // pointers to the same underlying object.
+  // checking pointer group for each pointer.
   if (!UseDependencies) {
     for (unsigned I = 0; I < Pointers.size(); ++I)
       CheckingGroups.push_back(CheckingPtrGroup(I, *this));
@@ -290,7 +222,7 @@ void RuntimePointerChecking::groupChecks(
   // don't process them twice.
   SmallSet<unsigned, 2> Seen;
 
-  // Go through all equivalence classes, get the "pointer check groups"
+  // Go through all equivalence classes, get the the "pointer check groups"
   // and add them to the overall solution. We use the order in which accesses
   // appear in 'Pointers' to enforce determinism.
   for (unsigned I = 0; I < Pointers.size(); ++I) {
@@ -348,14 +280,8 @@ void RuntimePointerChecking::groupChecks(
   }
 }
 
-bool RuntimePointerChecking::arePointersInSamePartition(
-    const SmallVectorImpl<int> &PtrToPartition, unsigned PtrIdx1,
-    unsigned PtrIdx2) {
-  return (PtrToPartition[PtrIdx1] != -1 &&
-          PtrToPartition[PtrIdx1] == PtrToPartition[PtrIdx2]);
-}
-
-bool RuntimePointerChecking::needsChecking(unsigned I, unsigned J) const {
+bool RuntimePointerChecking::needsChecking(
+    unsigned I, unsigned J, const SmallVectorImpl<int> *PtrPartition) const {
   const PointerInfo &PointerI = Pointers[I];
   const PointerInfo &PointerJ = Pointers[J];
 
@@ -371,45 +297,85 @@ bool RuntimePointerChecking::needsChecking(unsigned I, unsigned J) const {
   if (PointerI.AliasSetId != PointerJ.AliasSetId)
     return false;
 
+  // If PtrPartition is set omit checks between pointers of the same partition.
+  // Partition number -1 means that the pointer is used in multiple partitions.
+  // In this case we can't omit the check.
+  if (PtrPartition && (*PtrPartition)[I] != -1 &&
+      (*PtrPartition)[I] == (*PtrPartition)[J])
+    return false;
+
   return true;
 }
 
-void RuntimePointerChecking::printChecks(
-    raw_ostream &OS, const SmallVectorImpl<PointerCheck> &Checks,
-    unsigned Depth) const {
-  unsigned N = 0;
-  for (const auto &Check : Checks) {
-    const auto &First = Check.first->Members, &Second = Check.second->Members;
-
-    OS.indent(Depth) << "Check " << N++ << ":\n";
-
-    OS.indent(Depth + 2) << "Comparing group (" << Check.first << "):\n";
-    for (unsigned K = 0; K < First.size(); ++K)
-      OS.indent(Depth + 2) << *Pointers[First[K]].PointerValue << "\n";
-
-    OS.indent(Depth + 2) << "Against group (" << Check.second << "):\n";
-    for (unsigned K = 0; K < Second.size(); ++K)
-      OS.indent(Depth + 2) << *Pointers[Second[K]].PointerValue << "\n";
-  }
-}
-
-void RuntimePointerChecking::print(raw_ostream &OS, unsigned Depth) const {
+void RuntimePointerChecking::print(
+    raw_ostream &OS, unsigned Depth,
+    const SmallVectorImpl<int> *PtrPartition) const {
 
   OS.indent(Depth) << "Run-time memory checks:\n";
-  printChecks(OS, Checks, Depth);
+
+  unsigned N = 0;
+  for (unsigned I = 0; I < CheckingGroups.size(); ++I)
+    for (unsigned J = I + 1; J < CheckingGroups.size(); ++J)
+      if (needsChecking(CheckingGroups[I], CheckingGroups[J], PtrPartition)) {
+        OS.indent(Depth) << "Check " << N++ << ":\n";
+        OS.indent(Depth + 2) << "Comparing group " << I << ":\n";
+
+        for (unsigned K = 0; K < CheckingGroups[I].Members.size(); ++K) {
+          OS.indent(Depth + 2)
+              << *Pointers[CheckingGroups[I].Members[K]].PointerValue << "\n";
+          if (PtrPartition)
+            OS << " (Partition: "
+               << (*PtrPartition)[CheckingGroups[I].Members[K]] << ")"
+               << "\n";
+        }
+
+        OS.indent(Depth + 2) << "Against group " << J << ":\n";
+
+        for (unsigned K = 0; K < CheckingGroups[J].Members.size(); ++K) {
+          OS.indent(Depth + 2)
+              << *Pointers[CheckingGroups[J].Members[K]].PointerValue << "\n";
+          if (PtrPartition)
+            OS << " (Partition: "
+               << (*PtrPartition)[CheckingGroups[J].Members[K]] << ")"
+               << "\n";
+        }
+      }
 
   OS.indent(Depth) << "Grouped accesses:\n";
   for (unsigned I = 0; I < CheckingGroups.size(); ++I) {
-    const auto &CG = CheckingGroups[I];
-
-    OS.indent(Depth + 2) << "Group " << &CG << ":\n";
-    OS.indent(Depth + 4) << "(Low: " << *CG.Low << " High: " << *CG.High
-                         << ")\n";
-    for (unsigned J = 0; J < CG.Members.size(); ++J) {
-      OS.indent(Depth + 6) << "Member: " << *Pointers[CG.Members[J]].Expr
+    OS.indent(Depth + 2) << "Group " << I << ":\n";
+    OS.indent(Depth + 4) << "(Low: " << *CheckingGroups[I].Low
+                         << " High: " << *CheckingGroups[I].High << ")\n";
+    for (unsigned J = 0; J < CheckingGroups[I].Members.size(); ++J) {
+      OS.indent(Depth + 6) << "Member: "
+                           << *Pointers[CheckingGroups[I].Members[J]].Expr
                            << "\n";
     }
   }
+}
+
+unsigned RuntimePointerChecking::getNumberOfChecks(
+    const SmallVectorImpl<int> *PtrPartition) const {
+
+  unsigned NumPartitions = CheckingGroups.size();
+  unsigned CheckCount = 0;
+
+  for (unsigned I = 0; I < NumPartitions; ++I)
+    for (unsigned J = I + 1; J < NumPartitions; ++J)
+      if (needsChecking(CheckingGroups[I], CheckingGroups[J], PtrPartition))
+        CheckCount++;
+  return CheckCount;
+}
+
+bool RuntimePointerChecking::needsAnyChecking(
+    const SmallVectorImpl<int> *PtrPartition) const {
+  unsigned NumPointers = Pointers.size();
+
+  for (unsigned I = 0; I < NumPointers; ++I)
+    for (unsigned J = I + 1; J < NumPointers; ++J)
+      if (needsChecking(I, J, PtrPartition))
+        return true;
+  return false;
 }
 
 namespace {
@@ -424,10 +390,9 @@ public:
   typedef SmallPtrSet<MemAccessInfo, 8> MemAccessInfoSet;
 
   AccessAnalysis(const DataLayout &Dl, AliasAnalysis *AA, LoopInfo *LI,
-                 MemoryDepChecker::DepCandidates &DA,
-                 PredicatedScalarEvolution &PSE)
-      : DL(Dl), AST(*AA), LI(LI), DepCands(DA), IsRTCheckAnalysisNeeded(false),
-        PSE(PSE) {}
+                 MemoryDepChecker::DepCandidates &DA)
+      : DL(Dl), AST(*AA), LI(LI), DepCands(DA),
+        IsRTCheckAnalysisNeeded(false) {}
 
   /// \brief Register a load  and whether it is only read from.
   void addLoad(MemoryLocation &Loc, bool IsReadOnly) {
@@ -470,7 +435,7 @@ public:
   /// We decided that no dependence analysis would be used.  Reset the state.
   void resetDepChecks(MemoryDepChecker &DepChecker) {
     CheckDeps.clear();
-    DepChecker.clearDependences();
+    DepChecker.clearInterestingDependences();
   }
 
   MemAccessInfoSet &getDependenciesToCheck() { return CheckDeps; }
@@ -512,18 +477,14 @@ private:
   /// (i.e. ShouldRetryWithRuntimeCheck), isDependencyCheckNeeded is cleared
   /// while this remains set if we have potentially dependent accesses.
   bool IsRTCheckAnalysisNeeded;
-
-  /// The SCEV predicate containing all the SCEV-related assumptions.
-  PredicatedScalarEvolution &PSE;
 };
 
 } // end anonymous namespace
 
 /// \brief Check whether a pointer can participate in a runtime bounds check.
-static bool hasComputableBounds(PredicatedScalarEvolution &PSE,
-                                const ValueToValueMap &Strides, Value *Ptr,
-                                Loop *L) {
-  const SCEV *PtrScev = replaceSymbolicStrideSCEV(PSE, Strides, Ptr);
+static bool hasComputableBounds(ScalarEvolution *SE,
+                                const ValueToValueMap &Strides, Value *Ptr) {
+  const SCEV *PtrScev = replaceSymbolicStrideSCEV(SE, Strides, Ptr);
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PtrScev);
   if (!AR)
     return false;
@@ -566,11 +527,11 @@ bool AccessAnalysis::canCheckPtrAtRT(RuntimePointerChecking &RtCheck,
       else
         ++NumReadPtrChecks;
 
-      if (hasComputableBounds(PSE, StridesMap, Ptr, TheLoop) &&
+      if (hasComputableBounds(SE, StridesMap, Ptr) &&
           // When we run after a failing dependency check we have to make sure
           // we don't have wrapping pointers.
           (!ShouldCheckStride ||
-           isStridedPtr(PSE, Ptr, TheLoop, StridesMap) == 1)) {
+           isStridedPtr(SE, Ptr, TheLoop, StridesMap) == 1)) {
         // The id of the dependence set.
         unsigned DepId;
 
@@ -584,7 +545,7 @@ bool AccessAnalysis::canCheckPtrAtRT(RuntimePointerChecking &RtCheck,
           // Each access has its own dependence set.
           DepId = RunningDepId++;
 
-        RtCheck.insert(TheLoop, Ptr, IsWrite, DepId, ASId, StridesMap, PSE);
+        RtCheck.insert(TheLoop, Ptr, IsWrite, DepId, ASId, StridesMap);
 
         DEBUG(dbgs() << "LAA: Found a runtime check ptr:" << *Ptr << '\n');
       } else {
@@ -638,9 +599,9 @@ bool AccessAnalysis::canCheckPtrAtRT(RuntimePointerChecking &RtCheck,
   }
 
   if (NeedRTCheck && CanDoRT)
-    RtCheck.generateChecks(DepCands, IsDepCheckNeeded);
+    RtCheck.groupChecks(DepCands, IsDepCheckNeeded);
 
-  DEBUG(dbgs() << "LAA: We need to do " << RtCheck.getNumberOfChecks()
+  DEBUG(dbgs() << "LAA: We need to do " << RtCheck.getNumberOfChecks(nullptr)
                << " pointer comparisons.\n");
 
   RtCheck.Need = NeedRTCheck;
@@ -745,11 +706,6 @@ void AccessAnalysis::processMemAccesses() {
           GetUnderlyingObjects(Ptr, TempObjects, DL, LI);
           DEBUG(dbgs() << "Underlying objects for pointer " << *Ptr << "\n");
           for (Value *UnderlyingObj : TempObjects) {
-            // nullptr never alias, don't join sets for pointer that have "null"
-            // in their UnderlyingObjects list.
-            if (isa<ConstantPointerNull>(UnderlyingObj))
-              continue;
-
             UnderlyingObjToAccessMap::iterator Prev =
                 ObjToLastAccess.find(UnderlyingObj);
             if (Prev != ObjToLastAccess.end())
@@ -819,20 +775,20 @@ static bool isNoWrapAddRec(Value *Ptr, const SCEVAddRecExpr *AR,
 }
 
 /// \brief Check whether the access through \p Ptr has a constant stride.
-int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
-                       const Loop *Lp, const ValueToValueMap &StridesMap) {
-  Type *Ty = Ptr->getType();
+int llvm::isStridedPtr(ScalarEvolution *SE, Value *Ptr, const Loop *Lp,
+                       const ValueToValueMap &StridesMap) {
+  const Type *Ty = Ptr->getType();
   assert(Ty->isPointerTy() && "Unexpected non-ptr");
 
   // Make sure that the pointer does not point to aggregate types.
-  auto *PtrTy = cast<PointerType>(Ty);
+  const PointerType *PtrTy = cast<PointerType>(Ty);
   if (PtrTy->getElementType()->isAggregateType()) {
     DEBUG(dbgs() << "LAA: Bad stride - Not a pointer to a scalar type"
           << *Ptr << "\n");
     return 0;
   }
 
-  const SCEV *PtrScev = replaceSymbolicStrideSCEV(PSE, StridesMap, Ptr);
+  const SCEV *PtrScev = replaceSymbolicStrideSCEV(SE, StridesMap, Ptr);
 
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PtrScev);
   if (!AR) {
@@ -845,7 +801,6 @@ int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
   if (Lp != AR->getLoop()) {
     DEBUG(dbgs() << "LAA: Bad stride - Not striding over innermost loop " <<
           *Ptr << " SCEV: " << *PtrScev << "\n");
-    return 0;
   }
 
   // The address calculation must not wrap. Otherwise, a dependence could be
@@ -856,16 +811,16 @@ int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
   // to access the pointer value "0" which is undefined behavior in address
   // space 0, therefore we can also vectorize this case.
   bool IsInBoundsGEP = isInBoundsGep(Ptr);
-  bool IsNoWrapAddRec = isNoWrapAddRec(Ptr, AR, PSE.getSE(), Lp);
+  bool IsNoWrapAddRec = isNoWrapAddRec(Ptr, AR, SE, Lp);
   bool IsInAddressSpaceZero = PtrTy->getAddressSpace() == 0;
   if (!IsNoWrapAddRec && !IsInBoundsGEP && !IsInAddressSpaceZero) {
     DEBUG(dbgs() << "LAA: Bad stride - Pointer may wrap in the address space "
-                 << *Ptr << " SCEV: " << *PtrScev << "\n");
+          << *Ptr << " SCEV: " << *PtrScev << "\n");
     return 0;
   }
 
   // Check the step is constant.
-  const SCEV *Step = AR->getStepRecurrence(*PSE.getSE());
+  const SCEV *Step = AR->getStepRecurrence(*SE);
 
   // Calculate the pointer stride and check if it is constant.
   const SCEVConstant *C = dyn_cast<SCEVConstant>(Step);
@@ -877,7 +832,7 @@ int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
 
   auto &DL = Lp->getHeader()->getModule()->getDataLayout();
   int64_t Size = DL.getTypeAllocSize(PtrTy->getElementType());
-  const APInt &APStepVal = C->getAPInt();
+  const APInt &APStepVal = C->getValue()->getValue();
 
   // Huge step value - give up.
   if (APStepVal.getBitWidth() > 64)
@@ -917,15 +872,15 @@ bool MemoryDepChecker::Dependence::isSafeForVectorization(DepType Type) {
   llvm_unreachable("unexpected DepType!");
 }
 
-bool MemoryDepChecker::Dependence::isBackward() const {
+bool MemoryDepChecker::Dependence::isInterestingDependence(DepType Type) {
   switch (Type) {
   case NoDep:
   case Forward:
-  case ForwardButPreventsForwarding:
-  case Unknown:
     return false;
 
   case BackwardVectorizable:
+  case Unknown:
+  case ForwardButPreventsForwarding:
   case Backward:
   case BackwardVectorizableButPreventsForwarding:
     return true;
@@ -934,21 +889,17 @@ bool MemoryDepChecker::Dependence::isBackward() const {
 }
 
 bool MemoryDepChecker::Dependence::isPossiblyBackward() const {
-  return isBackward() || Type == Unknown;
-}
-
-bool MemoryDepChecker::Dependence::isForward() const {
   switch (Type) {
+  case NoDep:
   case Forward:
   case ForwardButPreventsForwarding:
-    return true;
+    return false;
 
-  case NoDep:
   case Unknown:
   case BackwardVectorizable:
   case Backward:
   case BackwardVectorizableButPreventsForwarding:
-    return false;
+    return true;
   }
   llvm_unreachable("unexpected DepType!");
 }
@@ -1048,11 +999,11 @@ MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
       BPtr->getType()->getPointerAddressSpace())
     return Dependence::Unknown;
 
-  const SCEV *AScev = replaceSymbolicStrideSCEV(PSE, Strides, APtr);
-  const SCEV *BScev = replaceSymbolicStrideSCEV(PSE, Strides, BPtr);
+  const SCEV *AScev = replaceSymbolicStrideSCEV(SE, Strides, APtr);
+  const SCEV *BScev = replaceSymbolicStrideSCEV(SE, Strides, BPtr);
 
-  int StrideAPtr = isStridedPtr(PSE, APtr, InnermostLoop, Strides);
-  int StrideBPtr = isStridedPtr(PSE, BPtr, InnermostLoop, Strides);
+  int StrideAPtr = isStridedPtr(SE, APtr, InnermostLoop, Strides);
+  int StrideBPtr = isStridedPtr(SE, BPtr, InnermostLoop, Strides);
 
   const SCEV *Src = AScev;
   const SCEV *Sink = BScev;
@@ -1069,12 +1020,12 @@ MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
     std::swap(StrideAPtr, StrideBPtr);
   }
 
-  const SCEV *Dist = PSE.getSE()->getMinusSCEV(Sink, Src);
+  const SCEV *Dist = SE->getMinusSCEV(Sink, Src);
 
   DEBUG(dbgs() << "LAA: Src Scev: " << *Src << "Sink Scev: " << *Sink
-               << "(Induction step: " << StrideAPtr << ")\n");
+        << "(Induction step: " << StrideAPtr <<  ")\n");
   DEBUG(dbgs() << "LAA: Distance for " << *InstMap[AIdx] << " to "
-               << *InstMap[BIdx] << ": " << *Dist << "\n");
+        << *InstMap[BIdx] << ": " << *Dist << "\n");
 
   // Need accesses with constant stride. We don't want to vectorize
   // "A[B[i]] += ..." and similar code or pointer arithmetic that could wrap in
@@ -1097,7 +1048,7 @@ MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
   unsigned TypeByteSize = DL.getTypeAllocSize(ATy);
 
   // Negative distances are not plausible dependencies.
-  const APInt &Val = C->getAPInt();
+  const APInt &Val = C->getValue()->getValue();
   if (Val.isNegative()) {
     bool IsTrueDataDependence = (AIsWrite && !BIsWrite);
     if (IsTrueDataDependence &&
@@ -1113,7 +1064,7 @@ MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
   // Could be improved to assert type sizes are the same (i32 == float, etc).
   if (Val == 0) {
     if (ATy == BTy)
-      return Dependence::Forward;
+      return Dependence::NoDep;
     DEBUG(dbgs() << "LAA: Zero dependence difference but different types\n");
     return Dependence::Unknown;
   }
@@ -1252,21 +1203,22 @@ bool MemoryDepChecker::areDepsSafe(DepCandidates &AccessSets,
                 isDependent(*A.first, A.second, *B.first, B.second, Strides);
             SafeForVectorization &= Dependence::isSafeForVectorization(Type);
 
-            // Gather dependences unless we accumulated MaxDependences
+            // Gather dependences unless we accumulated MaxInterestingDependence
             // dependences.  In that case return as soon as we find the first
             // unsafe dependence.  This puts a limit on this quadratic
             // algorithm.
-            if (RecordDependences) {
-              if (Type != Dependence::NoDep)
-                Dependences.push_back(Dependence(A.second, B.second, Type));
+            if (RecordInterestingDependences) {
+              if (Dependence::isInterestingDependence(Type))
+                InterestingDependences.push_back(
+                    Dependence(A.second, B.second, Type));
 
-              if (Dependences.size() >= MaxDependences) {
-                RecordDependences = false;
-                Dependences.clear();
+              if (InterestingDependences.size() >= MaxInterestingDependence) {
+                RecordInterestingDependences = false;
+                InterestingDependences.clear();
                 DEBUG(dbgs() << "Too many dependences, stopped recording\n");
               }
             }
-            if (!RecordDependences && !SafeForVectorization)
+            if (!RecordInterestingDependences && !SafeForVectorization)
               return false;
           }
         ++OI;
@@ -1275,7 +1227,8 @@ bool MemoryDepChecker::areDepsSafe(DepCandidates &AccessSets,
     }
   }
 
-  DEBUG(dbgs() << "Total Dependences: " << Dependences.size() << "\n");
+  DEBUG(dbgs() << "Total Interesting Dependences: "
+               << InterestingDependences.size() << "\n");
   return SafeForVectorization;
 }
 
@@ -1345,10 +1298,10 @@ bool LoopAccessInfo::canAnalyzeLoop() {
   }
 
   // ScalarEvolution needs to be able to find the exit count.
-  const SCEV *ExitCount = PSE.getSE()->getBackedgeTakenCount(TheLoop);
-  if (ExitCount == PSE.getSE()->getCouldNotCompute()) {
-    emitAnalysis(LoopAccessReport()
-                 << "could not determine number of loop iterations");
+  const SCEV *ExitCount = SE->getBackedgeTakenCount(TheLoop);
+  if (ExitCount == SE->getCouldNotCompute()) {
+    emitAnalysis(LoopAccessReport() <<
+                 "could not determine number of loop iterations");
     DEBUG(dbgs() << "LAA: SCEV could not compute the loop exit count.\n");
     return false;
   }
@@ -1417,7 +1370,7 @@ void LoopAccessInfo::analyzeLoop(const ValueToValueMap &Strides) {
       if (it->mayWriteToMemory()) {
         StoreInst *St = dyn_cast<StoreInst>(it);
         if (!St) {
-          emitAnalysis(LoopAccessReport(&*it) <<
+          emitAnalysis(LoopAccessReport(it) <<
                        "instruction cannot be vectorized");
           CanVecMem = false;
           return;
@@ -1449,7 +1402,7 @@ void LoopAccessInfo::analyzeLoop(const ValueToValueMap &Strides) {
 
   MemoryDepChecker::DepCandidates DependentAccesses;
   AccessAnalysis Accesses(TheLoop->getHeader()->getModule()->getDataLayout(),
-                          AA, LI, DependentAccesses, PSE);
+                          AA, LI, DependentAccesses);
 
   // Holds the analyzed pointers. We don't want to call GetUnderlyingObjects
   // multiple times on the same object. If the ptr is accessed twice, once
@@ -1500,7 +1453,7 @@ void LoopAccessInfo::analyzeLoop(const ValueToValueMap &Strides) {
     // read a few words, modify, and write a few words, and some of the
     // words may be written to the same address.
     bool IsReadOnlyPtr = false;
-    if (Seen.insert(Ptr).second || !isStridedPtr(PSE, Ptr, TheLoop, Strides)) {
+    if (Seen.insert(Ptr).second || !isStridedPtr(SE, Ptr, TheLoop, Strides)) {
       ++NumReads;
       IsReadOnlyPtr = true;
     }
@@ -1530,7 +1483,7 @@ void LoopAccessInfo::analyzeLoop(const ValueToValueMap &Strides) {
   // Find pointers with computable bounds. We are going to use this information
   // to place a runtime bound check.
   bool CanDoRTIfNeeded =
-      Accesses.canCheckPtrAtRT(PtrRtChecking, PSE.getSE(), TheLoop, Strides);
+      Accesses.canCheckPtrAtRT(PtrRtChecking, SE, TheLoop, Strides);
   if (!CanDoRTIfNeeded) {
     emitAnalysis(LoopAccessReport() << "cannot identify array bounds");
     DEBUG(dbgs() << "LAA: We can't vectorize because we can't find "
@@ -1557,7 +1510,6 @@ void LoopAccessInfo::analyzeLoop(const ValueToValueMap &Strides) {
       PtrRtChecking.reset();
       PtrRtChecking.Need = true;
 
-      auto *SE = PSE.getSE();
       CanDoRTIfNeeded =
           Accesses.canCheckPtrAtRT(PtrRtChecking, SE, TheLoop, Strides, true);
 
@@ -1600,7 +1552,7 @@ void LoopAccessInfo::emitAnalysis(LoopAccessReport &Message) {
 }
 
 bool LoopAccessInfo::isUniform(Value *V) const {
-  return (PSE.getSE()->isLoopInvariant(PSE.getSE()->getSCEV(V), TheLoop));
+  return (SE->isLoopInvariant(SE->getSCEV(V), TheLoop));
 }
 
 // FIXME: this function is currently a duplicate of the one in
@@ -1614,115 +1566,86 @@ static Instruction *getFirstInst(Instruction *FirstInst, Value *V,
   return nullptr;
 }
 
-namespace {
-/// \brief IR Values for the lower and upper bounds of a pointer evolution.  We
-/// need to use value-handles because SCEV expansion can invalidate previously
-/// expanded values.  Thus expansion of a pointer can invalidate the bounds for
-/// a previous one.
-struct PointerBounds {
-  TrackingVH<Value> Start;
-  TrackingVH<Value> End;
-};
-} // end anonymous namespace
+std::pair<Instruction *, Instruction *> LoopAccessInfo::addRuntimeCheck(
+    Instruction *Loc, const SmallVectorImpl<int> *PtrPartition) const {
+  if (!PtrRtChecking.Need)
+    return std::make_pair(nullptr, nullptr);
 
-/// \brief Expand code for the lower and upper bound of the pointer group \p CG
-/// in \p TheLoop.  \return the values for the bounds.
-static PointerBounds
-expandBounds(const RuntimePointerChecking::CheckingPtrGroup *CG, Loop *TheLoop,
-             Instruction *Loc, SCEVExpander &Exp, ScalarEvolution *SE,
-             const RuntimePointerChecking &PtrRtChecking) {
-  Value *Ptr = PtrRtChecking.Pointers[CG->Members[0]].PointerValue;
-  const SCEV *Sc = SE->getSCEV(Ptr);
-
-  if (SE->isLoopInvariant(Sc, TheLoop)) {
-    DEBUG(dbgs() << "LAA: Adding RT check for a loop invariant ptr:" << *Ptr
-                 << "\n");
-    return {Ptr, Ptr};
-  } else {
-    unsigned AS = Ptr->getType()->getPointerAddressSpace();
-    LLVMContext &Ctx = Loc->getContext();
-
-    // Use this type for pointer arithmetic.
-    Type *PtrArithTy = Type::getInt8PtrTy(Ctx, AS);
-    Value *Start = nullptr, *End = nullptr;
-
-    DEBUG(dbgs() << "LAA: Adding RT check for range:\n");
-    Start = Exp.expandCodeFor(CG->Low, PtrArithTy, Loc);
-    End = Exp.expandCodeFor(CG->High, PtrArithTy, Loc);
-    DEBUG(dbgs() << "Start: " << *CG->Low << " End: " << *CG->High << "\n");
-    return {Start, End};
-  }
-}
-
-/// \brief Turns a collection of checks into a collection of expanded upper and
-/// lower bounds for both pointers in the check.
-static SmallVector<std::pair<PointerBounds, PointerBounds>, 4> expandBounds(
-    const SmallVectorImpl<RuntimePointerChecking::PointerCheck> &PointerChecks,
-    Loop *L, Instruction *Loc, ScalarEvolution *SE, SCEVExpander &Exp,
-    const RuntimePointerChecking &PtrRtChecking) {
-  SmallVector<std::pair<PointerBounds, PointerBounds>, 4> ChecksWithBounds;
-
-  // Here we're relying on the SCEV Expander's cache to only emit code for the
-  // same bounds once.
-  std::transform(
-      PointerChecks.begin(), PointerChecks.end(),
-      std::back_inserter(ChecksWithBounds),
-      [&](const RuntimePointerChecking::PointerCheck &Check) {
-        PointerBounds
-          First = expandBounds(Check.first, L, Loc, Exp, SE, PtrRtChecking),
-          Second = expandBounds(Check.second, L, Loc, Exp, SE, PtrRtChecking);
-        return std::make_pair(First, Second);
-      });
-
-  return ChecksWithBounds;
-}
-
-std::pair<Instruction *, Instruction *> LoopAccessInfo::addRuntimeChecks(
-    Instruction *Loc,
-    const SmallVectorImpl<RuntimePointerChecking::PointerCheck> &PointerChecks)
-    const {
-  auto *SE = PSE.getSE();
-  SCEVExpander Exp(*SE, DL, "induction");
-  auto ExpandedChecks =
-      expandBounds(PointerChecks, TheLoop, Loc, SE, Exp, PtrRtChecking);
+  SmallVector<TrackingVH<Value>, 2> Starts;
+  SmallVector<TrackingVH<Value>, 2> Ends;
 
   LLVMContext &Ctx = Loc->getContext();
+  SCEVExpander Exp(*SE, DL, "induction");
   Instruction *FirstInst = nullptr;
+
+  for (unsigned i = 0; i < PtrRtChecking.CheckingGroups.size(); ++i) {
+    const RuntimePointerChecking::CheckingPtrGroup &CG =
+        PtrRtChecking.CheckingGroups[i];
+    Value *Ptr = PtrRtChecking.Pointers[CG.Members[0]].PointerValue;
+    const SCEV *Sc = SE->getSCEV(Ptr);
+
+    if (SE->isLoopInvariant(Sc, TheLoop)) {
+      DEBUG(dbgs() << "LAA: Adding RT check for a loop invariant ptr:" << *Ptr
+                   << "\n");
+      Starts.push_back(Ptr);
+      Ends.push_back(Ptr);
+    } else {
+      unsigned AS = Ptr->getType()->getPointerAddressSpace();
+
+      // Use this type for pointer arithmetic.
+      Type *PtrArithTy = Type::getInt8PtrTy(Ctx, AS);
+      Value *Start = nullptr, *End = nullptr;
+
+      DEBUG(dbgs() << "LAA: Adding RT check for range:\n");
+      Start = Exp.expandCodeFor(CG.Low, PtrArithTy, Loc);
+      End = Exp.expandCodeFor(CG.High, PtrArithTy, Loc);
+      DEBUG(dbgs() << "Start: " << *CG.Low << " End: " << *CG.High << "\n");
+      Starts.push_back(Start);
+      Ends.push_back(End);
+    }
+  }
+
   IRBuilder<> ChkBuilder(Loc);
   // Our instructions might fold to a constant.
   Value *MemoryRuntimeCheck = nullptr;
+  for (unsigned i = 0; i < PtrRtChecking.CheckingGroups.size(); ++i) {
+    for (unsigned j = i + 1; j < PtrRtChecking.CheckingGroups.size(); ++j) {
+      const RuntimePointerChecking::CheckingPtrGroup &CGI =
+          PtrRtChecking.CheckingGroups[i];
+      const RuntimePointerChecking::CheckingPtrGroup &CGJ =
+          PtrRtChecking.CheckingGroups[j];
 
-  for (const auto &Check : ExpandedChecks) {
-    const PointerBounds &A = Check.first, &B = Check.second;
-    // Check if two pointers (A and B) conflict where conflict is computed as:
-    // start(A) <= end(B) && start(B) <= end(A)
-    unsigned AS0 = A.Start->getType()->getPointerAddressSpace();
-    unsigned AS1 = B.Start->getType()->getPointerAddressSpace();
+      if (!PtrRtChecking.needsChecking(CGI, CGJ, PtrPartition))
+        continue;
 
-    assert((AS0 == B.End->getType()->getPointerAddressSpace()) &&
-           (AS1 == A.End->getType()->getPointerAddressSpace()) &&
-           "Trying to bounds check pointers with different address spaces");
+      unsigned AS0 = Starts[i]->getType()->getPointerAddressSpace();
+      unsigned AS1 = Starts[j]->getType()->getPointerAddressSpace();
 
-    Type *PtrArithTy0 = Type::getInt8PtrTy(Ctx, AS0);
-    Type *PtrArithTy1 = Type::getInt8PtrTy(Ctx, AS1);
+      assert((AS0 == Ends[j]->getType()->getPointerAddressSpace()) &&
+             (AS1 == Ends[i]->getType()->getPointerAddressSpace()) &&
+             "Trying to bounds check pointers with different address spaces");
 
-    Value *Start0 = ChkBuilder.CreateBitCast(A.Start, PtrArithTy0, "bc");
-    Value *Start1 = ChkBuilder.CreateBitCast(B.Start, PtrArithTy1, "bc");
-    Value *End0 =   ChkBuilder.CreateBitCast(A.End,   PtrArithTy1, "bc");
-    Value *End1 =   ChkBuilder.CreateBitCast(B.End,   PtrArithTy0, "bc");
+      Type *PtrArithTy0 = Type::getInt8PtrTy(Ctx, AS0);
+      Type *PtrArithTy1 = Type::getInt8PtrTy(Ctx, AS1);
 
-    Value *Cmp0 = ChkBuilder.CreateICmpULE(Start0, End1, "bound0");
-    FirstInst = getFirstInst(FirstInst, Cmp0, Loc);
-    Value *Cmp1 = ChkBuilder.CreateICmpULE(Start1, End0, "bound1");
-    FirstInst = getFirstInst(FirstInst, Cmp1, Loc);
-    Value *IsConflict = ChkBuilder.CreateAnd(Cmp0, Cmp1, "found.conflict");
-    FirstInst = getFirstInst(FirstInst, IsConflict, Loc);
-    if (MemoryRuntimeCheck) {
-      IsConflict =
-          ChkBuilder.CreateOr(MemoryRuntimeCheck, IsConflict, "conflict.rdx");
+      Value *Start0 = ChkBuilder.CreateBitCast(Starts[i], PtrArithTy0, "bc");
+      Value *Start1 = ChkBuilder.CreateBitCast(Starts[j], PtrArithTy1, "bc");
+      Value *End0 =   ChkBuilder.CreateBitCast(Ends[i],   PtrArithTy1, "bc");
+      Value *End1 =   ChkBuilder.CreateBitCast(Ends[j],   PtrArithTy0, "bc");
+
+      Value *Cmp0 = ChkBuilder.CreateICmpULE(Start0, End1, "bound0");
+      FirstInst = getFirstInst(FirstInst, Cmp0, Loc);
+      Value *Cmp1 = ChkBuilder.CreateICmpULE(Start1, End0, "bound1");
+      FirstInst = getFirstInst(FirstInst, Cmp1, Loc);
+      Value *IsConflict = ChkBuilder.CreateAnd(Cmp0, Cmp1, "found.conflict");
       FirstInst = getFirstInst(FirstInst, IsConflict, Loc);
+      if (MemoryRuntimeCheck) {
+        IsConflict = ChkBuilder.CreateOr(MemoryRuntimeCheck, IsConflict,
+                                         "conflict.rdx");
+        FirstInst = getFirstInst(FirstInst, IsConflict, Loc);
+      }
+      MemoryRuntimeCheck = IsConflict;
     }
-    MemoryRuntimeCheck = IsConflict;
   }
 
   if (!MemoryRuntimeCheck)
@@ -1738,20 +1661,12 @@ std::pair<Instruction *, Instruction *> LoopAccessInfo::addRuntimeChecks(
   return std::make_pair(FirstInst, Check);
 }
 
-std::pair<Instruction *, Instruction *>
-LoopAccessInfo::addRuntimeChecks(Instruction *Loc) const {
-  if (!PtrRtChecking.Need)
-    return std::make_pair(nullptr, nullptr);
-
-  return addRuntimeChecks(Loc, PtrRtChecking.getChecks());
-}
-
 LoopAccessInfo::LoopAccessInfo(Loop *L, ScalarEvolution *SE,
                                const DataLayout &DL,
                                const TargetLibraryInfo *TLI, AliasAnalysis *AA,
                                DominatorTree *DT, LoopInfo *LI,
                                const ValueToValueMap &Strides)
-    : PSE(*SE), PtrRtChecking(SE), DepChecker(PSE, L), TheLoop(L), DL(DL),
+    : PtrRtChecking(SE), DepChecker(SE, L), TheLoop(L), SE(SE), DL(DL),
       TLI(TLI), AA(AA), DT(DT), LI(LI), NumLoads(0), NumStores(0),
       MaxSafeDepDistBytes(-1U), CanVecMem(false),
       StoreToLoopInvariantAddress(false) {
@@ -1770,14 +1685,14 @@ void LoopAccessInfo::print(raw_ostream &OS, unsigned Depth) const {
   if (Report)
     OS.indent(Depth) << "Report: " << Report->str() << "\n";
 
-  if (auto *Dependences = DepChecker.getDependences()) {
-    OS.indent(Depth) << "Dependences:\n";
-    for (auto &Dep : *Dependences) {
+  if (auto *InterestingDependences = DepChecker.getInterestingDependences()) {
+    OS.indent(Depth) << "Interesting Dependences:\n";
+    for (auto &Dep : *InterestingDependences) {
       Dep.print(OS, Depth + 2, DepChecker.getMemoryInstructions());
       OS << "\n";
     }
   } else
-    OS.indent(Depth) << "Too many dependences, not recorded\n";
+    OS.indent(Depth) << "Too many interesting dependences, not recorded\n";
 
   // List the pair of accesses need run-time checks to prove independence.
   PtrRtChecking.print(OS, Depth);
@@ -1786,9 +1701,6 @@ void LoopAccessInfo::print(raw_ostream &OS, unsigned Depth) const {
   OS.indent(Depth) << "Store to invariant address was "
                    << (StoreToLoopInvariantAddress ? "" : "not ")
                    << "found in loop.\n";
-
-  OS.indent(Depth) << "SCEV assumptions:\n";
-  PSE.getUnionPredicate().print(OS, Depth);
 }
 
 const LoopAccessInfo &
@@ -1802,8 +1714,8 @@ LoopAccessAnalysis::getInfo(Loop *L, const ValueToValueMap &Strides) {
 
   if (!LAI) {
     const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
-    LAI =
-        llvm::make_unique<LoopAccessInfo>(L, SE, DL, TLI, AA, DT, LI, Strides);
+    LAI = llvm::make_unique<LoopAccessInfo>(L, SE, DL, TLI, AA, DT, LI,
+                                            Strides);
 #ifndef NDEBUG
     LAI->NumSymbolicStrides = Strides.size();
 #endif
@@ -1825,10 +1737,10 @@ void LoopAccessAnalysis::print(raw_ostream &OS, const Module *M) const {
 }
 
 bool LoopAccessAnalysis::runOnFunction(Function &F) {
-  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  SE = &getAnalysis<ScalarEvolution>();
   auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
   TLI = TLIP ? &TLIP->getTLI() : nullptr;
-  AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
+  AA = &getAnalysis<AliasAnalysis>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
 
@@ -1836,8 +1748,8 @@ bool LoopAccessAnalysis::runOnFunction(Function &F) {
 }
 
 void LoopAccessAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
-    AU.addRequired<ScalarEvolutionWrapperPass>();
-    AU.addRequired<AAResultsWrapperPass>();
+    AU.addRequired<ScalarEvolution>();
+    AU.addRequired<AliasAnalysis>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<LoopInfoWrapperPass>();
 
@@ -1849,8 +1761,8 @@ static const char laa_name[] = "Loop Access Analysis";
 #define LAA_NAME "loop-accesses"
 
 INITIALIZE_PASS_BEGIN(LoopAccessAnalysis, LAA_NAME, laa_name, false, true)
-INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
+INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_END(LoopAccessAnalysis, LAA_NAME, laa_name, false, true)

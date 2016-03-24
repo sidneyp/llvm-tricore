@@ -19,8 +19,6 @@
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
@@ -43,7 +41,7 @@ using namespace llvm;
 // integer domain inputs, produce an integer output; fadd, for example.
 //
 // If a non-mappable instruction is seen, this entire def-use graph is marked
-// as non-transformable. If we see an instruction that converts from the
+// as non-transformable. If we see an instruction that converts from the 
 // integer domain to FP domain (uitofp,sitofp), we terminate our walk.
 
 /// The largest integer type worth dealing with.
@@ -62,7 +60,6 @@ namespace {
     bool runOnFunction(Function &F) override;
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
-      AU.addPreserved<GlobalsAAWrapperPass>();
     }
 
     void findRoots(Function &F, SmallPtrSet<Instruction*,8> &Roots);
@@ -85,9 +82,7 @@ namespace {
 }
 
 char Float2Int::ID = 0;
-INITIALIZE_PASS_BEGIN(Float2Int, "float2int", "Float to int", false, false)
-INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
-INITIALIZE_PASS_END(Float2Int, "float2int", "Float to int", false, false)
+INITIALIZE_PASS(Float2Int, "float2int", "Float to int", false, false)
 
 // Given a FCmp predicate, return a matching ICmp predicate if one
 // exists, otherwise return BAD_ICMP_PREDICATE.
@@ -130,9 +125,7 @@ static Instruction::BinaryOps mapBinOpcode(unsigned Opcode) {
 // Find the roots - instructions that convert from the FP domain to
 // integer domain.
 void Float2Int::findRoots(Function &F, SmallPtrSet<Instruction*,8> &Roots) {
-  for (auto &I : instructions(F)) {
-    if (isa<VectorType>(I.getType()))
-      continue;
+  for (auto &I : inst_range(F)) {
     switch (I.getOpcode()) {
     default: break;
     case Instruction::FPToUI:
@@ -140,7 +133,7 @@ void Float2Int::findRoots(Function &F, SmallPtrSet<Instruction*,8> &Roots) {
       Roots.insert(&I);
       break;
     case Instruction::FCmp:
-      if (mapFCmpPred(cast<CmpInst>(&I)->getPredicate()) !=
+      if (mapFCmpPred(cast<CmpInst>(&I)->getPredicate()) != 
           CmpInst::BAD_ICMP_PREDICATE)
         Roots.insert(&I);
       break;
@@ -183,7 +176,7 @@ ConstantRange Float2Int::validateRange(ConstantRange R) {
 //   - walkForwards:  Iterate over SeenInsts in reverse order, so we visit
 //                     defs before their uses. Calculate the real range info.
 
-// Breadth-first walk of the use-def graph; determine the set of nodes
+// Breadth-first walk of the use-def graph; determine the set of nodes 
 // we care about and eagerly determine if some of them are poisonous.
 void Float2Int::walkBackwards(const SmallPtrSetImpl<Instruction*> &Roots) {
   std::deque<Instruction*> Worklist(Roots.begin(), Roots.end());
@@ -229,14 +222,14 @@ void Float2Int::walkBackwards(const SmallPtrSetImpl<Instruction*> &Roots) {
       seen(I, unknownRange());
       break;
     }
-
+  
     for (Value *O : I->operands()) {
       if (Instruction *OI = dyn_cast<Instruction>(O)) {
         // Unify def-use chains if they interfere.
         ECs.unionSets(I, OI);
-        if (SeenInsts.find(I)->second != badRange())
+	if (SeenInsts.find(I)->second != badRange())
           Worklist.push_back(OI);
-      } else if (!isa<ConstantFP>(O)) {
+      } else if (!isa<ConstantFP>(O)) {      
         // Not an instruction or ConstantFP? we can't do anything.
         seen(I, badRange());
       }
@@ -247,11 +240,11 @@ void Float2Int::walkBackwards(const SmallPtrSetImpl<Instruction*> &Roots) {
 // Walk forwards down the list of seen instructions, so we visit defs before
 // uses.
 void Float2Int::walkForwards() {
-  for (auto &It : make_range(SeenInsts.rbegin(), SeenInsts.rend())) {
-    if (It.second != unknownRange())
+  for (auto It = SeenInsts.rbegin(), E = SeenInsts.rend(); It != E; ++It) {
+    if (It->second != unknownRange())
       continue;
 
-    Instruction *I = It.first;
+    Instruction *I = It->first;
     std::function<ConstantRange(ArrayRef<ConstantRange>)> Op;
     switch (I->getOpcode()) {
       // FIXME: Handle select and phi nodes.
@@ -306,7 +299,7 @@ void Float2Int::walkForwards() {
     for (Value *O : I->operands()) {
       if (Instruction *OI = dyn_cast<Instruction>(O)) {
         assert(SeenInsts.find(OI) != SeenInsts.end() &&
-               "def not seen before use!");
+	       "def not seen before use!");
         OpRanges.push_back(SeenInsts.find(OI)->second);
       } else if (ConstantFP *CF = dyn_cast<ConstantFP>(O)) {
         // Work out if the floating point number can be losslessly represented
@@ -321,11 +314,11 @@ void Float2Int::walkForwards() {
         APFloat F = CF->getValueAPF();
 
         // First, weed out obviously incorrect values. Non-finite numbers
-        // can't be represented and neither can negative zero, unless
+        // can't be represented and neither can negative zero, unless 
         // we're in fast math mode.
         if (!F.isFinite() ||
             (F.isZero() && F.isNegative() && isa<FPMathOperator>(I) &&
-             !I->hasNoSignedZeros())) {
+	     !I->hasNoSignedZeros())) {
           seen(I, badRange());
           Abort = true;
           break;
@@ -352,7 +345,7 @@ void Float2Int::walkForwards() {
 
     // Reduce the operands' ranges to a single range and return.
     if (!Abort)
-      seen(I, Op(OpRanges));
+      seen(I, Op(OpRanges));    
   }
 }
 
@@ -402,7 +395,7 @@ bool Float2Int::validateAndTransform() {
         R.isFullSet() || R.isSignWrappedSet())
       continue;
     assert(ConvertedToTy && "Must have set the convertedtoty by this point!");
-
+    
     // The number of bits required is the maximum of the upper and
     // lower limits, plus one so it can be signed.
     unsigned MinBW = std::max(R.getLower().getMinSignedBits(),
@@ -512,8 +505,9 @@ Value *Float2Int::convert(Instruction *I, Type *ToTy) {
 
 // Perform dead code elimination on the instructions we just modified.
 void Float2Int::cleanup() {
-  for (auto &I : make_range(ConvertedInsts.rbegin(), ConvertedInsts.rend()))
-    I.first->eraseFromParent();
+  for (auto I = ConvertedInsts.rbegin(), E = ConvertedInsts.rend();
+       I != E; ++I)
+    I->first->eraseFromParent();
 }
 
 bool Float2Int::runOnFunction(Function &F) {
@@ -540,4 +534,7 @@ bool Float2Int::runOnFunction(Function &F) {
   return Modified;
 }
 
-FunctionPass *llvm::createFloat2IntPass() { return new Float2Int(); }
+FunctionPass *llvm::createFloat2IntPass() {
+  return new Float2Int();
+}
+

@@ -29,7 +29,7 @@ protected:
   }
 };
 
-class ConcreteCallbackVH final : public CallbackVH {
+class ConcreteCallbackVH : public CallbackVH {
 public:
   ConcreteCallbackVH(Value *V) : CallbackVH(V) {}
 };
@@ -235,7 +235,7 @@ TEST_F(ValueHandle, CallbackVH_Comparisons) {
 }
 
 TEST_F(ValueHandle, CallbackVH_CallbackOnDeletion) {
-  class RecordingVH final : public CallbackVH {
+  class RecordingVH : public CallbackVH {
   public:
     int DeletedCalls;
     int AURWCalls;
@@ -261,7 +261,7 @@ TEST_F(ValueHandle, CallbackVH_CallbackOnDeletion) {
 }
 
 TEST_F(ValueHandle, CallbackVH_CallbackOnRAUW) {
-  class RecordingVH final : public CallbackVH {
+  class RecordingVH : public CallbackVH {
   public:
     int DeletedCalls;
     Value *AURWArgument;
@@ -291,7 +291,7 @@ TEST_F(ValueHandle, CallbackVH_CallbackOnRAUW) {
 }
 
 TEST_F(ValueHandle, CallbackVH_DeletionCanRAUW) {
-  class RecoveringVH final : public CallbackVH {
+  class RecoveringVH : public CallbackVH {
   public:
     int DeletedCalls;
     Value *AURWArgument;
@@ -339,7 +339,7 @@ TEST_F(ValueHandle, DestroyingOtherVHOnSameValueDoesntBreakIteration) {
   // arrangement of other VHs so that the bad behavior would be
   // triggered in whichever order callbacks run.
 
-  class DestroyingVH final : public CallbackVH {
+  class DestroyingVH : public CallbackVH {
   public:
     std::unique_ptr<WeakVH> ToClear[2];
     DestroyingVH(Value *V) {
@@ -384,7 +384,7 @@ TEST_F(ValueHandle, AssertingVHCheckedLast) {
   // Value deletion, the CallbackVH should get a chance to do so
   // before the AssertingVHs assert.
 
-  class ClearingVH final : public CallbackVH {
+  class ClearingVH : public CallbackVH {
   public:
     AssertingVH<Value> *ToClear[2];
     ClearingVH(Value *V,

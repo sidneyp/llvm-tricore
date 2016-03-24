@@ -117,8 +117,8 @@ Delinearize("da-delinearize", cl::init(false), cl::Hidden, cl::ZeroOrMore,
 INITIALIZE_PASS_BEGIN(DependenceAnalysis, "da",
                       "Dependence Analysis", true, true)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
+INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_END(DependenceAnalysis, "da",
                     "Dependence Analysis", true, true)
 
@@ -132,8 +132,8 @@ FunctionPass *llvm::createDependenceAnalysisPass() {
 
 bool DependenceAnalysis::runOnFunction(Function &F) {
   this->F = &F;
-  AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
-  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  AA = &getAnalysis<AliasAnalysis>();
+  SE = &getAnalysis<ScalarEvolution>();
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   return false;
 }
@@ -145,8 +145,8 @@ void DependenceAnalysis::releaseMemory() {
 
 void DependenceAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequiredTransitive<AAResultsWrapperPass>();
-  AU.addRequiredTransitive<ScalarEvolutionWrapperPass>();
+  AU.addRequiredTransitive<AliasAnalysis>();
+  AU.addRequiredTransitive<ScalarEvolution>();
   AU.addRequiredTransitive<LoopInfoWrapperPass>();
 }
 
@@ -233,8 +233,7 @@ FullDependence::FullDependence(Instruction *Source, Instruction *Destination,
     : Dependence(Source, Destination), Levels(CommonLevels),
       LoopIndependent(PossiblyLoopIndependent) {
   Consistent = true;
-  if (CommonLevels)
-    DV = make_unique<DVEntry[]>(CommonLevels);
+  DV = CommonLevels ? new DVEntry[CommonLevels] : nullptr;
 }
 
 // The rest are simple getters that hide the implementation.
@@ -372,7 +371,7 @@ void DependenceAnalysis::Constraint::setLine(const SCEV *AA,
 void DependenceAnalysis::Constraint::setDistance(const SCEV *D,
                                                  const Loop *CurLoop) {
   Kind = Distance;
-  A = SE->getOne(D->getType());
+  A = SE->getConstant(D->getType(), 1);
   B = SE->getNegativeSCEV(A);
   C = SE->getNegativeSCEV(D);
   AssociatedLoop = CurLoop;
@@ -501,10 +500,10 @@ bool DependenceAnalysis::intersectConstraints(Constraint *X,
       if (!C1B2_C2B1 || !C1A2_C2A1 ||
           !A1B2_A2B1 || !A2B1_A1B2)
         return false;
-      APInt Xtop = C1B2_C2B1->getAPInt();
-      APInt Xbot = A1B2_A2B1->getAPInt();
-      APInt Ytop = C1A2_C2A1->getAPInt();
-      APInt Ybot = A2B1_A1B2->getAPInt();
+      APInt Xtop = C1B2_C2B1->getValue()->getValue();
+      APInt Xbot = A1B2_A2B1->getValue()->getValue();
+      APInt Ytop = C1A2_C2A1->getValue()->getValue();
+      APInt Ybot = A2B1_A1B2->getValue()->getValue();
       DEBUG(dbgs() << "\t\tXtop = " << Xtop << "\n");
       DEBUG(dbgs() << "\t\tXbot = " << Xbot << "\n");
       DEBUG(dbgs() << "\t\tYtop = " << Ytop << "\n");
@@ -528,7 +527,7 @@ bool DependenceAnalysis::intersectConstraints(Constraint *X,
       }
       if (const SCEVConstant *CUB =
           collectConstantUpperBound(X->getAssociatedLoop(), Prod1->getType())) {
-        APInt UpperBound = CUB->getAPInt();
+        APInt UpperBound = CUB->getValue()->getValue();
         DEBUG(dbgs() << "\t\tupper bound = " << UpperBound << "\n");
         if (Xq.sgt(UpperBound) || Yq.sgt(UpperBound)) {
           X->setEmpty();
@@ -631,8 +630,8 @@ static AliasResult underlyingObjectsAlias(AliasAnalysis *AA,
                                           const Value *B) {
   const Value *AObj = GetUnderlyingObject(A, DL);
   const Value *BObj = GetUnderlyingObject(B, DL);
-  return AA->alias(AObj, DL.getTypeStoreSize(AObj->getType()),
-                   BObj, DL.getTypeStoreSize(BObj->getType()));
+  return AA->alias(AObj, AA->getTypeStoreSize(AObj->getType()),
+                   BObj, AA->getTypeStoreSize(BObj->getType()));
 }
 
 
@@ -1115,8 +1114,8 @@ bool DependenceAnalysis::strongSIVtest(const SCEV *Coeff,
 
   // Can we compute distance?
   if (isa<SCEVConstant>(Delta) && isa<SCEVConstant>(Coeff)) {
-    APInt ConstDelta = cast<SCEVConstant>(Delta)->getAPInt();
-    APInt ConstCoeff = cast<SCEVConstant>(Coeff)->getAPInt();
+    APInt ConstDelta = cast<SCEVConstant>(Delta)->getValue()->getValue();
+    APInt ConstCoeff = cast<SCEVConstant>(Coeff)->getValue()->getValue();
     APInt Distance  = ConstDelta; // these need to be initialized
     APInt Remainder = ConstDelta;
     APInt::sdivrem(ConstDelta, ConstCoeff, Distance, Remainder);
@@ -1257,9 +1256,11 @@ bool DependenceAnalysis::weakCrossingSIVtest(const SCEV *Coeff,
   assert(SE->isKnownPositive(ConstCoeff) && "ConstCoeff should be positive");
 
   // compute SplitIter for use by DependenceAnalysis::getSplitIteration()
-  SplitIter = SE->getUDivExpr(
-      SE->getSMaxExpr(SE->getZero(Delta->getType()), Delta),
-      SE->getMulExpr(SE->getConstant(Delta->getType(), 2), ConstCoeff));
+  SplitIter =
+    SE->getUDivExpr(SE->getSMaxExpr(SE->getConstant(Delta->getType(), 0),
+                                    Delta),
+                    SE->getMulExpr(SE->getConstant(Delta->getType(), 2),
+                                   ConstCoeff));
   DEBUG(dbgs() << "\t    Split iter = " << *SplitIter << "\n");
 
   const SCEVConstant *ConstDelta = dyn_cast<SCEVConstant>(Delta);
@@ -1301,14 +1302,14 @@ bool DependenceAnalysis::weakCrossingSIVtest(const SCEV *Coeff,
         return true;
       }
       Result.DV[Level].Splitable = false;
-      Result.DV[Level].Distance = SE->getZero(Delta->getType());
+      Result.DV[Level].Distance = SE->getConstant(Delta->getType(), 0);
       return false;
     }
   }
 
   // check that Coeff divides Delta
-  APInt APDelta = ConstDelta->getAPInt();
-  APInt APCoeff = ConstCoeff->getAPInt();
+  APInt APDelta = ConstDelta->getValue()->getValue();
+  APInt APCoeff = ConstCoeff->getValue()->getValue();
   APInt Distance = APDelta; // these need to be initialzed
   APInt Remainder = APDelta;
   APInt::sdivrem(APDelta, APCoeff, Distance, Remainder);
@@ -1462,10 +1463,10 @@ bool DependenceAnalysis::exactSIVtest(const SCEV *SrcCoeff,
 
   // find gcd
   APInt G, X, Y;
-  APInt AM = ConstSrcCoeff->getAPInt();
-  APInt BM = ConstDstCoeff->getAPInt();
+  APInt AM = ConstSrcCoeff->getValue()->getValue();
+  APInt BM = ConstDstCoeff->getValue()->getValue();
   unsigned Bits = AM.getBitWidth();
-  if (findGCD(Bits, AM, BM, ConstDelta->getAPInt(), G, X, Y)) {
+  if (findGCD(Bits, AM, BM, ConstDelta->getValue()->getValue(), G, X, Y)) {
     // gcd doesn't divide Delta, no dependence
     ++ExactSIVindependence;
     ++ExactSIVsuccesses;
@@ -1480,7 +1481,7 @@ bool DependenceAnalysis::exactSIVtest(const SCEV *SrcCoeff,
   // UM is perhaps unavailable, let's check
   if (const SCEVConstant *CUB =
       collectConstantUpperBound(CurLoop, Delta->getType())) {
-    UM = CUB->getAPInt();
+    UM = CUB->getValue()->getValue();
     DEBUG(dbgs() << "\t    UM = " << UM << "\n");
     UMvalid = true;
   }
@@ -1608,8 +1609,8 @@ bool DependenceAnalysis::exactSIVtest(const SCEV *SrcCoeff,
 static
 bool isRemainderZero(const SCEVConstant *Dividend,
                      const SCEVConstant *Divisor) {
-  APInt ConstDividend = Dividend->getAPInt();
-  APInt ConstDivisor = Divisor->getAPInt();
+  APInt ConstDividend = Dividend->getValue()->getValue();
+  APInt ConstDivisor = Divisor->getValue()->getValue();
   return ConstDividend.srem(ConstDivisor) == 0;
 }
 
@@ -1664,8 +1665,8 @@ bool DependenceAnalysis::weakZeroSrcSIVtest(const SCEV *DstCoeff,
   Level--;
   Result.Consistent = false;
   const SCEV *Delta = SE->getMinusSCEV(SrcConst, DstConst);
-  NewConstraint.setLine(SE->getZero(Delta->getType()), DstCoeff, Delta,
-                        CurLoop);
+  NewConstraint.setLine(SE->getConstant(Delta->getType(), 0),
+                        DstCoeff, Delta, CurLoop);
   DEBUG(dbgs() << "\t    Delta = " << *Delta << "\n");
   if (isKnownPredicate(CmpInst::ICMP_EQ, SrcConst, DstConst)) {
     if (Level < CommonLevels) {
@@ -1774,8 +1775,8 @@ bool DependenceAnalysis::weakZeroDstSIVtest(const SCEV *SrcCoeff,
   Level--;
   Result.Consistent = false;
   const SCEV *Delta = SE->getMinusSCEV(DstConst, SrcConst);
-  NewConstraint.setLine(SrcCoeff, SE->getZero(Delta->getType()), Delta,
-                        CurLoop);
+  NewConstraint.setLine(SrcCoeff, SE->getConstant(Delta->getType(), 0),
+                        Delta, CurLoop);
   DEBUG(dbgs() << "\t    Delta = " << *Delta << "\n");
   if (isKnownPredicate(CmpInst::ICMP_EQ, DstConst, SrcConst)) {
     if (Level < CommonLevels) {
@@ -1866,10 +1867,10 @@ bool DependenceAnalysis::exactRDIVtest(const SCEV *SrcCoeff,
 
   // find gcd
   APInt G, X, Y;
-  APInt AM = ConstSrcCoeff->getAPInt();
-  APInt BM = ConstDstCoeff->getAPInt();
+  APInt AM = ConstSrcCoeff->getValue()->getValue();
+  APInt BM = ConstDstCoeff->getValue()->getValue();
   unsigned Bits = AM.getBitWidth();
-  if (findGCD(Bits, AM, BM, ConstDelta->getAPInt(), G, X, Y)) {
+  if (findGCD(Bits, AM, BM, ConstDelta->getValue()->getValue(), G, X, Y)) {
     // gcd doesn't divide Delta, no dependence
     ++ExactRDIVindependence;
     return true;
@@ -1883,7 +1884,7 @@ bool DependenceAnalysis::exactRDIVtest(const SCEV *SrcCoeff,
   // SrcUM is perhaps unavailable, let's check
   if (const SCEVConstant *UpperBound =
       collectConstantUpperBound(SrcLoop, Delta->getType())) {
-    SrcUM = UpperBound->getAPInt();
+    SrcUM = UpperBound->getValue()->getValue();
     DEBUG(dbgs() << "\t    SrcUM = " << SrcUM << "\n");
     SrcUMvalid = true;
   }
@@ -1893,7 +1894,7 @@ bool DependenceAnalysis::exactRDIVtest(const SCEV *SrcCoeff,
   // UM is perhaps unavailable, let's check
   if (const SCEVConstant *UpperBound =
       collectConstantUpperBound(DstLoop, Delta->getType())) {
-    DstUM = UpperBound->getAPInt();
+    DstUM = UpperBound->getValue()->getValue();
     DEBUG(dbgs() << "\t    DstUM = " << DstUM << "\n");
     DstUMvalid = true;
   }
@@ -2306,7 +2307,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
       Constant = getConstantPart(Product);
     if (!Constant)
       return false;
-    APInt ConstCoeff = Constant->getAPInt();
+    APInt ConstCoeff = Constant->getValue()->getValue();
     RunningGCD = APIntOps::GreatestCommonDivisor(RunningGCD, ConstCoeff.abs());
     Coefficients = AddRec->getStart();
   }
@@ -2327,7 +2328,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
       Constant = getConstantPart(Product);
     if (!Constant)
       return false;
-    APInt ConstCoeff = Constant->getAPInt();
+    APInt ConstCoeff = Constant->getValue()->getValue();
     RunningGCD = APIntOps::GreatestCommonDivisor(RunningGCD, ConstCoeff.abs());
     Coefficients = AddRec->getStart();
   }
@@ -2351,7 +2352,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
         const SCEVConstant *ConstOp = getConstantPart(Product);
         if (!ConstOp)
           return false;
-        APInt ConstOpValue = ConstOp->getAPInt();
+        APInt ConstOpValue = ConstOp->getValue()->getValue();
         ExtraGCD = APIntOps::GreatestCommonDivisor(ExtraGCD,
                                                    ConstOpValue.abs());
       }
@@ -2361,7 +2362,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
   }
   if (!Constant)
     return false;
-  APInt ConstDelta = cast<SCEVConstant>(Constant)->getAPInt();
+  APInt ConstDelta = cast<SCEVConstant>(Constant)->getValue()->getValue();
   DEBUG(dbgs() << "    ConstDelta = " << ConstDelta << "\n");
   if (ConstDelta == 0)
     return false;
@@ -2409,7 +2410,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
           Constant = getConstantPart(Product);
         else
           Constant = cast<SCEVConstant>(Coeff);
-        APInt ConstCoeff = Constant->getAPInt();
+        APInt ConstCoeff = Constant->getValue()->getValue();
         RunningGCD = APIntOps::GreatestCommonDivisor(RunningGCD, ConstCoeff.abs());
       }
       Inner = AddRec->getStart();
@@ -2427,7 +2428,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
           Constant = getConstantPart(Product);
         else
           Constant = cast<SCEVConstant>(Coeff);
-        APInt ConstCoeff = Constant->getAPInt();
+        APInt ConstCoeff = Constant->getValue()->getValue();
         RunningGCD = APIntOps::GreatestCommonDivisor(RunningGCD, ConstCoeff.abs());
       }
       Inner = AddRec->getStart();
@@ -2444,7 +2445,7 @@ bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
       // or constant, in which case we give up on this direction.
       continue;
     }
-    APInt ConstCoeff = Constant->getAPInt();
+    APInt ConstCoeff = Constant->getValue()->getValue();
     RunningGCD = APIntOps::GreatestCommonDivisor(RunningGCD, ConstCoeff.abs());
     DEBUG(dbgs() << "\tRunningGCD = " << RunningGCD << "\n");
     if (RunningGCD != 0) {
@@ -2727,10 +2728,10 @@ void DependenceAnalysis::findBoundsALL(CoefficientInfo *A,
     // If the difference is 0, we won't need to know the number of iterations.
     if (isKnownPredicate(CmpInst::ICMP_EQ, A[K].NegPart, B[K].PosPart))
       Bound[K].Lower[Dependence::DVEntry::ALL] =
-          SE->getZero(A[K].Coeff->getType());
+        SE->getConstant(A[K].Coeff->getType(), 0);
     if (isKnownPredicate(CmpInst::ICMP_EQ, A[K].PosPart, B[K].NegPart))
       Bound[K].Upper[Dependence::DVEntry::ALL] =
-          SE->getZero(A[K].Coeff->getType());
+        SE->getConstant(A[K].Coeff->getType(), 0);
   }
 }
 
@@ -2799,8 +2800,9 @@ void DependenceAnalysis::findBoundsLT(CoefficientInfo *A,
   Bound[K].Lower[Dependence::DVEntry::LT] = nullptr; // Default value = -infinity.
   Bound[K].Upper[Dependence::DVEntry::LT] = nullptr; // Default value = +infinity.
   if (Bound[K].Iterations) {
-    const SCEV *Iter_1 = SE->getMinusSCEV(
-        Bound[K].Iterations, SE->getOne(Bound[K].Iterations->getType()));
+    const SCEV *Iter_1 =
+      SE->getMinusSCEV(Bound[K].Iterations,
+                       SE->getConstant(Bound[K].Iterations->getType(), 1));
     const SCEV *NegPart =
       getNegativePart(SE->getMinusSCEV(A[K].NegPart, B[K].Coeff));
     Bound[K].Lower[Dependence::DVEntry::LT] =
@@ -2845,8 +2847,9 @@ void DependenceAnalysis::findBoundsGT(CoefficientInfo *A,
   Bound[K].Lower[Dependence::DVEntry::GT] = nullptr; // Default value = -infinity.
   Bound[K].Upper[Dependence::DVEntry::GT] = nullptr; // Default value = +infinity.
   if (Bound[K].Iterations) {
-    const SCEV *Iter_1 = SE->getMinusSCEV(
-        Bound[K].Iterations, SE->getOne(Bound[K].Iterations->getType()));
+    const SCEV *Iter_1 =
+      SE->getMinusSCEV(Bound[K].Iterations,
+                       SE->getConstant(Bound[K].Iterations->getType(), 1));
     const SCEV *NegPart =
       getNegativePart(SE->getMinusSCEV(A[K].Coeff, B[K].PosPart));
     Bound[K].Lower[Dependence::DVEntry::GT] =
@@ -2871,13 +2874,13 @@ void DependenceAnalysis::findBoundsGT(CoefficientInfo *A,
 
 // X^+ = max(X, 0)
 const SCEV *DependenceAnalysis::getPositivePart(const SCEV *X) const {
-  return SE->getSMaxExpr(X, SE->getZero(X->getType()));
+  return SE->getSMaxExpr(X, SE->getConstant(X->getType(), 0));
 }
 
 
 // X^- = min(X, 0)
 const SCEV *DependenceAnalysis::getNegativePart(const SCEV *X) const {
-  return SE->getSMinExpr(X, SE->getZero(X->getType()));
+  return SE->getSMinExpr(X, SE->getConstant(X->getType(), 0));
 }
 
 
@@ -2888,7 +2891,7 @@ DependenceAnalysis::CoefficientInfo *
 DependenceAnalysis::collectCoeffInfo(const SCEV *Subscript,
                                      bool SrcFlag,
                                      const SCEV *&Constant) const {
-  const SCEV *Zero = SE->getZero(Subscript->getType());
+  const SCEV *Zero = SE->getConstant(Subscript->getType(), 0);
   CoefficientInfo *CI = new CoefficientInfo[MaxLevels + 1];
   for (unsigned K = 1; K <= MaxLevels; ++K) {
     CI[K].Coeff = Zero;
@@ -2972,7 +2975,7 @@ const SCEV *DependenceAnalysis::findCoefficient(const SCEV *Expr,
                                                 const Loop *TargetLoop)  const {
   const SCEVAddRecExpr *AddRec = dyn_cast<SCEVAddRecExpr>(Expr);
   if (!AddRec)
-    return SE->getZero(Expr->getType());
+    return SE->getConstant(Expr->getType(), 0);
   if (AddRec->getLoop() == TargetLoop)
     return AddRec->getStepRecurrence(*SE);
   return findCoefficient(AddRec->getStart(), TargetLoop);
@@ -3107,8 +3110,8 @@ bool DependenceAnalysis::propagateLine(const SCEV *&Src,
     const SCEVConstant *Bconst = dyn_cast<SCEVConstant>(B);
     const SCEVConstant *Cconst = dyn_cast<SCEVConstant>(C);
     if (!Bconst || !Cconst) return false;
-    APInt Beta = Bconst->getAPInt();
-    APInt Charlie = Cconst->getAPInt();
+    APInt Beta = Bconst->getValue()->getValue();
+    APInt Charlie = Cconst->getValue()->getValue();
     APInt CdivB = Charlie.sdiv(Beta);
     assert(Charlie.srem(Beta) == 0 && "C should be evenly divisible by B");
     const SCEV *AP_K = findCoefficient(Dst, CurLoop);
@@ -3122,8 +3125,8 @@ bool DependenceAnalysis::propagateLine(const SCEV *&Src,
     const SCEVConstant *Aconst = dyn_cast<SCEVConstant>(A);
     const SCEVConstant *Cconst = dyn_cast<SCEVConstant>(C);
     if (!Aconst || !Cconst) return false;
-    APInt Alpha = Aconst->getAPInt();
-    APInt Charlie = Cconst->getAPInt();
+    APInt Alpha = Aconst->getValue()->getValue();
+    APInt Charlie = Cconst->getValue()->getValue();
     APInt CdivA = Charlie.sdiv(Alpha);
     assert(Charlie.srem(Alpha) == 0 && "C should be evenly divisible by A");
     const SCEV *A_K = findCoefficient(Src, CurLoop);
@@ -3136,8 +3139,8 @@ bool DependenceAnalysis::propagateLine(const SCEV *&Src,
     const SCEVConstant *Aconst = dyn_cast<SCEVConstant>(A);
     const SCEVConstant *Cconst = dyn_cast<SCEVConstant>(C);
     if (!Aconst || !Cconst) return false;
-    APInt Alpha = Aconst->getAPInt();
-    APInt Charlie = Cconst->getAPInt();
+    APInt Alpha = Aconst->getValue()->getValue();
+    APInt Charlie = Cconst->getValue()->getValue();
     APInt CdivA = Charlie.sdiv(Alpha);
     assert(Charlie.srem(Alpha) == 0 && "C should be evenly divisible by A");
     const SCEV *A_K = findCoefficient(Src, CurLoop);
@@ -3241,36 +3244,20 @@ void DependenceAnalysis::updateDirection(Dependence::DVEntry &Level,
 /// source and destination array references are recurrences on a nested loop,
 /// this function flattens the nested recurrences into separate recurrences
 /// for each loop level.
-bool DependenceAnalysis::tryDelinearize(Instruction *Src,
-                                        Instruction *Dst,
-                                        SmallVectorImpl<Subscript> &Pair)
-{
-  Value *SrcPtr = getPointerOperand(Src);
-  Value *DstPtr = getPointerOperand(Dst);
-
-  Loop *SrcLoop = LI->getLoopFor(Src->getParent());
-  Loop *DstLoop = LI->getLoopFor(Dst->getParent());
-
-  // Below code mimics the code in Delinearization.cpp
-  const SCEV *SrcAccessFn =
-    SE->getSCEVAtScope(SrcPtr, SrcLoop);
-  const SCEV *DstAccessFn =
-    SE->getSCEVAtScope(DstPtr, DstLoop);
-
+bool DependenceAnalysis::tryDelinearize(const SCEV *SrcSCEV,
+                                        const SCEV *DstSCEV,
+                                        SmallVectorImpl<Subscript> &Pair,
+                                        const SCEV *ElementSize) {
   const SCEVUnknown *SrcBase =
-      dyn_cast<SCEVUnknown>(SE->getPointerBase(SrcAccessFn));
+      dyn_cast<SCEVUnknown>(SE->getPointerBase(SrcSCEV));
   const SCEVUnknown *DstBase =
-      dyn_cast<SCEVUnknown>(SE->getPointerBase(DstAccessFn));
+      dyn_cast<SCEVUnknown>(SE->getPointerBase(DstSCEV));
 
   if (!SrcBase || !DstBase || SrcBase != DstBase)
     return false;
 
-  const SCEV *ElementSize = SE->getElementSize(Src);
-  if (ElementSize != SE->getElementSize(Dst))
-    return false;
-
-  const SCEV *SrcSCEV = SE->getMinusSCEV(SrcAccessFn, SrcBase);
-  const SCEV *DstSCEV = SE->getMinusSCEV(DstAccessFn, DstBase);
+  SrcSCEV = SE->getMinusSCEV(SrcSCEV, SrcBase);
+  DstSCEV = SE->getMinusSCEV(DstSCEV, DstBase);
 
   const SCEVAddRecExpr *SrcAR = dyn_cast<SCEVAddRecExpr>(SrcSCEV);
   const SCEVAddRecExpr *DstAR = dyn_cast<SCEVAddRecExpr>(DstSCEV);
@@ -3342,6 +3329,7 @@ static void dumpSmallBitVector(SmallBitVector &BV) {
   dbgs() << "}\n";
 }
 #endif
+
 
 // depends -
 // Returns NULL if there is no dependence.
@@ -3437,11 +3425,10 @@ DependenceAnalysis::depends(Instruction *Src, Instruction *Dst,
     Pair[0].Dst = DstSCEV;
   }
 
-  if (Delinearize && CommonLevels > 1) {
-    if (tryDelinearize(Src, Dst, Pair)) {
-      DEBUG(dbgs() << "    delinerized GEP\n");
-      Pairs = Pair.size();
-    }
+  if (Delinearize && Pairs == 1 && CommonLevels > 1 &&
+      tryDelinearize(Pair[0].Src, Pair[0].Dst, Pair, SE->getElementSize(Src))) {
+    DEBUG(dbgs() << "    delinerized GEP\n");
+    Pairs = Pair.size();
   }
 
   for (unsigned P = 0; P < Pairs; ++P) {
@@ -3759,7 +3746,9 @@ DependenceAnalysis::depends(Instruction *Src, Instruction *Dst,
       return nullptr;
   }
 
-  return make_unique<FullDependence>(std::move(Result));
+  auto Final = make_unique<FullDependence>(Result);
+  Result.DV = nullptr;
+  return std::move(Final);
 }
 
 
@@ -3863,11 +3852,10 @@ const  SCEV *DependenceAnalysis::getSplitIteration(const Dependence &Dep,
     Pair[0].Dst = DstSCEV;
   }
 
-  if (Delinearize && CommonLevels > 1) {
-    if (tryDelinearize(Src, Dst, Pair)) {
-      DEBUG(dbgs() << "    delinerized GEP\n");
-      Pairs = Pair.size();
-    }
+  if (Delinearize && Pairs == 1 && CommonLevels > 1 &&
+      tryDelinearize(Pair[0].Src, Pair[0].Dst, Pair, SE->getElementSize(Src))) {
+    DEBUG(dbgs() << "    delinerized GEP\n");
+    Pairs = Pair.size();
   }
 
   for (unsigned P = 0; P < Pairs; ++P) {

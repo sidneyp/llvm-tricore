@@ -192,10 +192,10 @@ public:
         TII(*Subtarget->getInstrInfo()), TLI(*Subtarget->getTargetLowering()) {
     MFI = funcInfo.MF->getInfo<MipsFunctionInfo>();
     Context = &funcInfo.Fn->getContext();
-    bool ISASupported = !Subtarget->hasMips32r6() && Subtarget->hasMips32();
     TargetSupported =
-        ISASupported && (TM.getRelocationModel() == Reloc::PIC_) &&
-        (static_cast<const MipsTargetMachine &>(TM).getABI().IsO32());
+        ((TM.getRelocationModel() == Reloc::PIC_) &&
+         ((Subtarget->hasMips32r2() || Subtarget->hasMips32()) &&
+          (static_cast<const MipsTargetMachine &>(TM).getABI().IsO32())));
     UnsupportedFPMode = Subtarget->isFP64bit();
   }
 
@@ -236,34 +236,30 @@ unsigned MipsFastISel::emitLogicalOp(unsigned ISDOpc, MVT RetVT,
     std::swap(LHS, RHS);
 
   unsigned Opc;
-  switch (ISDOpc) {
-  case ISD::AND:
+  if (ISDOpc == ISD::AND) {
     Opc = Mips::AND;
-    break;
-  case ISD::OR:
+  } else if (ISDOpc == ISD::OR) {
     Opc = Mips::OR;
-    break;
-  case ISD::XOR:
+  } else if (ISDOpc == ISD::XOR) {
     Opc = Mips::XOR;
-    break;
-  default:
+  } else
     llvm_unreachable("unexpected opcode");
-  }
 
   unsigned LHSReg = getRegForValue(LHS);
-  if (!LHSReg)
+  unsigned ResultReg = createResultReg(&Mips::GPR32RegClass);
+  if (!ResultReg)
     return 0;
 
   unsigned RHSReg;
+  if (!LHSReg)
+    return 0;
+
   if (const auto *C = dyn_cast<ConstantInt>(RHS))
     RHSReg = materializeInt(C, MVT::i32);
   else
     RHSReg = getRegForValue(RHS);
-  if (!RHSReg)
-    return 0;
 
-  unsigned ResultReg = createResultReg(&Mips::GPR32RegClass);
-  if (!ResultReg)
+  if (!RHSReg)
     return 0;
 
   emitInst(Opc, ResultReg).addReg(LHSReg).addReg(RHSReg);
@@ -751,7 +747,7 @@ bool MipsFastISel::emitLoad(MVT VT, unsigned &ResultReg, Address &Addr,
     unsigned Offset = Addr.getOffset();
     MachineFrameInfo &MFI = *MF->getFrameInfo();
     MachineMemOperand *MMO = MF->getMachineMemOperand(
-        MachinePointerInfo::getFixedStack(*MF, FI), MachineMemOperand::MOLoad,
+        MachinePointerInfo::getFixedStack(FI), MachineMemOperand::MOLoad,
         MFI.getObjectSize(FI), Align);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc), ResultReg)
         .addFrameIndex(FI)
@@ -802,7 +798,7 @@ bool MipsFastISel::emitStore(MVT VT, unsigned SrcReg, Address &Addr,
     unsigned Offset = Addr.getOffset();
     MachineFrameInfo &MFI = *MF->getFrameInfo();
     MachineMemOperand *MMO = MF->getMachineMemOperand(
-        MachinePointerInfo::getFixedStack(*MF, FI), MachineMemOperand::MOLoad,
+        MachinePointerInfo::getFixedStack(FI), MachineMemOperand::MOLoad,
         MFI.getObjectSize(FI), Align);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc))
         .addReg(SrcReg)
@@ -916,7 +912,8 @@ bool MipsFastISel::selectBranch(const Instruction *I) {
     BuildMI(*BrBB, FuncInfo.InsertPt, DbgLoc, TII.get(Mips::BGTZ))
         .addReg(CondReg)
         .addMBB(TBB);
-    finishCondBranch(BI->getParent(), TBB, FBB);
+    fastEmitBranch(FBB, DbgLoc);
+    FuncInfo.MBB->addSuccessor(TBB);
     return true;
   }
   return false;
@@ -1060,16 +1057,22 @@ bool MipsFastISel::selectFPToInt(const Instruction *I, bool IsSigned) {
   // entirely within FPRs.
   unsigned DestReg = createResultReg(&Mips::GPR32RegClass);
   unsigned TempReg = createResultReg(&Mips::FGR32RegClass);
-  unsigned Opc = (SrcVT == MVT::f32) ? Mips::TRUNC_W_S : Mips::TRUNC_W_D32;
+  unsigned Opc;
+
+  if (SrcVT == MVT::f32)
+    Opc = Mips::TRUNC_W_S;
+  else
+    Opc = Mips::TRUNC_W_D32;
 
   // Generate the convert.
   emitInst(Opc, TempReg).addReg(SrcReg);
+
   emitInst(Mips::MFC1, DestReg).addReg(TempReg);
 
   updateValueMap(I, DestReg);
   return true;
 }
-
+//
 bool MipsFastISel::processCallArgs(CallLoweringInfo &CLI,
                                    SmallVectorImpl<MVT> &OutVTs,
                                    unsigned &NumBytes) {
@@ -1193,7 +1196,7 @@ bool MipsFastISel::processCallArgs(CallLoweringInfo &CLI,
 
       unsigned Alignment = DL.getABITypeAlignment(ArgVal->getType());
       MachineMemOperand *MMO = FuncInfo.MF->getMachineMemOperand(
-          MachinePointerInfo::getStack(*FuncInfo.MF, Addr.getOffset()),
+          MachinePointerInfo::getStack(Addr.getOffset()),
           MachineMemOperand::MOStore, ArgVT.getStoreSize(), Alignment);
       (void)(MMO);
       // if (!emitStore(ArgVT, ArgReg, Addr, MMO))
@@ -1604,23 +1607,19 @@ bool MipsFastISel::emitIntSExt(MVT SrcVT, unsigned SrcReg, MVT DestVT,
 
 bool MipsFastISel::emitIntZExt(MVT SrcVT, unsigned SrcReg, MVT DestVT,
                                unsigned DestReg) {
-  int64_t Imm;
-
   switch (SrcVT.SimpleTy) {
   default:
     return false;
   case MVT::i1:
-    Imm = 1;
+    emitInst(Mips::ANDi, DestReg).addReg(SrcReg).addImm(1);
     break;
   case MVT::i8:
-    Imm = 0xff;
+    emitInst(Mips::ANDi, DestReg).addReg(SrcReg).addImm(0xff);
     break;
   case MVT::i16:
-    Imm = 0xffff;
+    emitInst(Mips::ANDi, DestReg).addReg(SrcReg).addImm(0xffff);
     break;
   }
-
-  emitInst(Mips::ANDi, DestReg).addReg(SrcReg).addImm(Imm);
   return true;
 }
 

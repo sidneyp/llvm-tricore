@@ -79,6 +79,9 @@ XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM,
   // Compute derived properties from the register classes
   computeRegisterProperties(Subtarget.getRegisterInfo());
 
+  // Division is expensive
+  setIntDivIsCheap(false);
+
   setStackPointerRegisterToSaveRestore(XCore::SP);
 
   setSchedulingPreference(Sched::Source);
@@ -151,6 +154,8 @@ XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM,
 
   // Exception handling
   setOperationAction(ISD::EH_RETURN, MVT::Other, Custom);
+  setExceptionPointerRegister(XCore::R0);
+  setExceptionSelectorRegister(XCore::R1);
   setOperationAction(ISD::FRAME_TO_ARGS_OFFSET, MVT::i32, Custom);
 
   // Atomic operations
@@ -834,7 +839,7 @@ LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const {
   SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
   return DAG.getLoad(
       getPointerTy(DAG.getDataLayout()), SDLoc(Op), DAG.getEntryNode(), FIN,
-      MachinePointerInfo::getFixedStack(MF, FI), false, false, false, 0);
+      MachinePointerInfo::getFixedStack(FI), false, false, false, 0);
 }
 
 SDValue XCoreTargetLowering::
@@ -1362,8 +1367,8 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
       //from this parameter
       SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
       ArgIn = DAG.getLoad(VA.getLocVT(), dl, Chain, FIN,
-                          MachinePointerInfo::getFixedStack(MF, FI), false,
-                          false, false, 0);
+                          MachinePointerInfo::getFixedStack(FI),
+                          false, false, false, 0);
     }
     const ArgDataPair ADP = { ArgIn, Ins[i].Flags };
     ArgData.push_back(ADP);
@@ -1512,10 +1517,9 @@ XCoreTargetLowering::LowerReturn(SDValue Chain,
     // Create a SelectionDAG node corresponding to a store
     // to this memory location.
     SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
-    MemOpChains.push_back(DAG.getStore(
-        Chain, dl, OutVals[i], FIN,
-        MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI), false,
-        false, 0));
+    MemOpChains.push_back(DAG.getStore(Chain, dl, OutVals[i], FIN,
+                          MachinePointerInfo::getFixedStack(FI), false, false,
+                          0));
   }
 
   // Transform all store nodes into one single node because
@@ -1563,7 +1567,8 @@ XCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   // to set, the condition code register to branch on, the true/false values to
   // select between, and a branch opcode to use.
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction::iterator It = ++BB->getIterator();
+  MachineFunction::iterator It = BB;
+  ++It;
 
   //  thisMBB:
   //  ...
@@ -1823,8 +1828,9 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
     SDValue Chain = ST->getChain();
 
     unsigned StoreBits = ST->getMemoryVT().getStoreSizeInBits();
-    assert((StoreBits % 8) == 0 &&
-           "Store size in bits must be a multiple of 8");
+    if (StoreBits % 8) {
+      break;
+    }
     unsigned ABIAlignment = DAG.getDataLayout().getABITypeAlignment(
         ST->getMemoryVT().getTypeForEVT(*DCI.DAG.getContext()));
     unsigned Alignment = ST->getAlignment();

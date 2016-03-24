@@ -45,8 +45,14 @@ static void completeEphemeralValues(SmallVector<const Value *, 16> &WorkSet,
       continue;
 
     // If all uses of this value are ephemeral, then so is this value.
-    if (!std::all_of(V->user_begin(), V->user_end(),
-                     [&](const User *U) { return EphValues.count(U); }))
+    bool FoundNEUse = false;
+    for (const User *I : V->users())
+      if (!EphValues.count(I)) {
+        FoundNEUse = true;
+        break;
+      }
+
+    if (FoundNEUse)
       continue;
 
     EphValues.insert(V);
@@ -110,7 +116,7 @@ void CodeMetrics::analyzeBasicBlock(const BasicBlock *BB,
   for (BasicBlock::const_iterator II = BB->begin(), E = BB->end();
        II != E; ++II) {
     // Skip ephemeral values.
-    if (EphValues.count(&*II))
+    if (EphValues.count(II))
       continue;
 
     // Special handling for calls.
@@ -148,9 +154,6 @@ void CodeMetrics::analyzeBasicBlock(const BasicBlock *BB,
 
     if (isa<ExtractElementInst>(II) || II->getType()->isVectorTy())
       ++NumVectorInsts;
-
-    if (II->getType()->isTokenTy() && II->isUsedOutsideOfBlock(BB))
-      notDuplicatable = true;
 
     if (const CallInst *CI = dyn_cast<CallInst>(II))
       if (CI->cannotDuplicate())

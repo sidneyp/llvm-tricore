@@ -42,10 +42,8 @@ struct SparcRegisterInfo : public SparcGenRegisterInfo {
   void processFunctionBeforeFrameFinalized(MachineFunction &MF,
                                        RegScavenger *RS = nullptr) const;
 
+  // Debug information queries.
   unsigned getFrameRegister(const MachineFunction &MF) const override;
-
-  bool canRealignStack(const MachineFunction &MF) const override;
-
 };
 
 } // end namespace llvm

@@ -10,6 +10,4 @@ LEVEL = ../../..
 TOOLNAME = Kaleidoscope-Ch2
 EXAMPLE_TOOL = 1
 
-LLVM_CXXFLAGS := -Wno-unused-private-field
-
 include $(LEVEL)/Makefile.common

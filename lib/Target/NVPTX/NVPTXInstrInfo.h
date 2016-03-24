@@ -56,6 +56,7 @@ public:
                            unsigned &DestReg) const;
   bool isLoadInstr(const MachineInstr &MI, unsigned &AddrSpace) const;
   bool isStoreInstr(const MachineInstr &MI, unsigned &AddrSpace) const;
+  bool isReadSpecialReg(MachineInstr &MI) const;
 
   virtual bool CanTailMerge(const MachineInstr *MI) const;
   // Branch analysis.

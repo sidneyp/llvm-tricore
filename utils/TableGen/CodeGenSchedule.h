@@ -72,10 +72,10 @@ struct CodeGenSchedRW {
     IsSequence = Def->isSubClassOf("WriteSequence");
   }
 
-  CodeGenSchedRW(unsigned Idx, bool Read, ArrayRef<unsigned> Seq,
+  CodeGenSchedRW(unsigned Idx, bool Read, const IdxVec &Seq,
                  const std::string &Name)
-      : Index(Idx), Name(Name), TheDef(nullptr), IsRead(Read), IsAlias(false),
-        HasVariants(false), IsVariadic(false), IsSequence(true), Sequence(Seq) {
+    : Index(Idx), Name(Name), TheDef(nullptr), IsRead(Read), IsAlias(false),
+      HasVariants(false), IsVariadic(false), IsSequence(true), Sequence(Seq) {
     assert(Sequence.size() > 1 && "implied sequence needs >1 RWs");
   }
 
@@ -144,9 +144,8 @@ struct CodeGenSchedClass {
 
   CodeGenSchedClass(): Index(0), ItinClassDef(nullptr) {}
 
-  bool isKeyEqual(Record *IC, ArrayRef<unsigned> W, ArrayRef<unsigned> R) {
-    return ItinClassDef == IC && makeArrayRef(Writes) == W &&
-           makeArrayRef(Reads) == R;
+  bool isKeyEqual(Record *IC, const IdxVec &W, const IdxVec &R) {
+    return ItinClassDef == IC && Writes == W && Reads == R;
   }
 
   // Is this class generated from a variants if existing classes? Instructions
@@ -257,16 +256,18 @@ public:
   class_iterator classes_end() { return SchedClasses.end(); }
   const_class_iterator classes_end() const { return SchedClasses.end(); }
   iterator_range<class_iterator> classes() {
-   return make_range(classes_begin(), classes_end());
+   return iterator_range<class_iterator>(classes_begin(), classes_end());
   }
   iterator_range<const_class_iterator> classes() const {
-   return make_range(classes_begin(), classes_end());
+   return iterator_range<const_class_iterator>(classes_begin(), classes_end());
   }
   iterator_range<class_iterator> explicit_classes() {
-    return make_range(classes_begin(), classes_begin() + NumInstrSchedClasses);
+    return iterator_range<class_iterator>(
+        classes_begin(), classes_begin() + NumInstrSchedClasses);
   }
   iterator_range<const_class_iterator> explicit_classes() const {
-    return make_range(classes_begin(), classes_begin() + NumInstrSchedClasses);
+    return iterator_range<const_class_iterator>(
+        classes_begin(), classes_begin() + NumInstrSchedClasses);
   }
 
   Record *getModelOrItinDef(Record *ProcDef) const {
@@ -362,14 +363,14 @@ public:
   void expandRWSeqForProc(unsigned RWIdx, IdxVec &RWSeq, bool IsRead,
                           const CodeGenProcModel &ProcModel) const;
 
-  unsigned addSchedClass(Record *ItinDef, ArrayRef<unsigned> OperWrites,
-                         ArrayRef<unsigned> OperReads,
-                         ArrayRef<unsigned> ProcIndices);
+  unsigned addSchedClass(Record *ItinDef, const IdxVec &OperWrites,
+                         const IdxVec &OperReads, const IdxVec &ProcIndices);
 
   unsigned findOrInsertRW(ArrayRef<unsigned> Seq, bool IsRead);
 
-  unsigned findSchedClassIdx(Record *ItinClassDef, ArrayRef<unsigned> Writes,
-                             ArrayRef<unsigned> Reads) const;
+  unsigned findSchedClassIdx(Record *ItinClassDef,
+                             const IdxVec &Writes,
+                             const IdxVec &Reads) const;
 
   Record *findProcResUnits(Record *ProcResKind,
                            const CodeGenProcModel &PM) const;
@@ -382,14 +383,14 @@ private:
 
   void collectSchedRW();
 
-  std::string genRWName(ArrayRef<unsigned> Seq, bool IsRead);
-  unsigned findRWForSequence(ArrayRef<unsigned> Seq, bool IsRead);
+  std::string genRWName(const IdxVec& Seq, bool IsRead);
+  unsigned findRWForSequence(const IdxVec &Seq, bool IsRead);
 
   void collectSchedClasses();
 
   std::string createSchedClassName(Record *ItinClassDef,
-                                   ArrayRef<unsigned> OperWrites,
-                                   ArrayRef<unsigned> OperReads);
+                                   const IdxVec &OperWrites,
+                                   const IdxVec &OperReads);
   std::string createSchedClassName(const RecVec &InstDefs);
   void createInstRWClass(Record *InstRWDef);
 
@@ -399,8 +400,8 @@ private:
 
   void inferSchedClasses();
 
-  void inferFromRW(ArrayRef<unsigned> OperWrites, ArrayRef<unsigned> OperReads,
-                   unsigned FromClassIdx, ArrayRef<unsigned> ProcIndices);
+  void inferFromRW(const IdxVec &OperWrites, const IdxVec &OperReads,
+                   unsigned FromClassIdx, const IdxVec &ProcIndices);
   void inferFromItinClass(Record *ItinClassDef, unsigned FromClassIdx);
   void inferFromInstRWs(unsigned SCIdx);
 
@@ -412,10 +413,10 @@ private:
   void collectItinProcResources(Record *ItinClassDef);
 
   void collectRWResources(unsigned RWIdx, bool IsRead,
-                          ArrayRef<unsigned> ProcIndices);
+                          const IdxVec &ProcIndices);
 
-  void collectRWResources(ArrayRef<unsigned> Writes, ArrayRef<unsigned> Reads,
-                          ArrayRef<unsigned> ProcIndices);
+  void collectRWResources(const IdxVec &Writes, const IdxVec &Reads,
+                          const IdxVec &ProcIndices);
 
   void addProcResource(Record *ProcResourceKind, CodeGenProcModel &PM);
 

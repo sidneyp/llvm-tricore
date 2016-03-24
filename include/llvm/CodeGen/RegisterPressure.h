@@ -125,13 +125,11 @@ class PressureDiff {
   enum { MaxPSets = 16 };
 
   PressureChange PressureChanges[MaxPSets];
-
-  typedef PressureChange* iterator;
-  iterator nonconst_begin() { return &PressureChanges[0]; }
-  iterator nonconst_end() { return &PressureChanges[MaxPSets]; }
-
 public:
+  typedef PressureChange* iterator;
   typedef const PressureChange* const_iterator;
+  iterator begin() { return &PressureChanges[0]; }
+  iterator end() { return &PressureChanges[MaxPSets]; }
   const_iterator begin() const { return &PressureChanges[0]; }
   const_iterator end() const { return &PressureChanges[MaxPSets]; }
 
@@ -139,28 +137,6 @@ public:
                          const MachineRegisterInfo *MRI);
 
   LLVM_DUMP_METHOD void dump(const TargetRegisterInfo &TRI) const;
-};
-
-/// List of registers defined and used by a machine instruction.
-class RegisterOperands {
-public:
-  /// List of virtual regiserts and register units read by the instruction.
-  SmallVector<unsigned, 8> Uses;
-  /// \brief List of virtual registers and register units defined by the
-  /// instruction which are not dead.
-  SmallVector<unsigned, 8> Defs;
-  /// \brief List of virtual registers and register units defined by the
-  /// instruction but dead.
-  SmallVector<unsigned, 8> DeadDefs;
-
-  /// Analyze the given instruction \p MI and fill in the Uses, Defs and
-  /// DeadDefs list based on the MachineOperand flags.
-  void collect(const MachineInstr &MI, const TargetRegisterInfo &TRI,
-               const MachineRegisterInfo &MRI, bool IgnoreDead = false);
-
-  /// Use liveness information to find dead defs not marked with a dead flag
-  /// and move them to the DeadDefs vector.
-  void detectDeadDefs(const MachineInstr &MI, const LiveIntervals &LIS);
 };
 
 /// Array of PressureDiffs.
@@ -183,10 +159,6 @@ public:
   const PressureDiff &operator[](unsigned Idx) const {
     return const_cast<PressureDiffs*>(this)->operator[](Idx);
   }
-  /// \brief Record pressure difference induced by the given operand list to
-  /// node with index \p Idx.
-  void addInstruction(unsigned Idx, const RegisterOperands &RegOpers,
-                      const MachineRegisterInfo &MRI);
 };
 
 /// Store the effects of a change in pressure on things that MI scheduler cares
@@ -219,56 +191,30 @@ struct RegPressureDelta {
   }
 };
 
-/// A set of live virtual registers and physical register units.
+/// \brief A set of live virtual registers and physical register units.
 ///
-/// This is a wrapper around a SparseSet which deals with mapping register unit
-/// and virtual register indexes to an index usable by the sparse set.
-class LiveRegSet {
-private:
-  SparseSet<unsigned> Regs;
-  unsigned NumRegUnits;
-
-  unsigned getSparseIndexFromReg(unsigned Reg) const {
-    if (TargetRegisterInfo::isVirtualRegister(Reg))
-      return TargetRegisterInfo::virtReg2Index(Reg) + NumRegUnits;
-    assert(Reg < NumRegUnits);
-    return Reg;
-  }
-  unsigned getRegFromSparseIndex(unsigned SparseIndex) const {
-    if (SparseIndex >= NumRegUnits)
-      return TargetRegisterInfo::index2VirtReg(SparseIndex-NumRegUnits);
-    return SparseIndex;
-  }
-
-public:
-  void clear();
-  void init(const MachineRegisterInfo &MRI);
+/// Virtual and physical register numbers require separate sparse sets, but most
+/// of the RegisterPressureTracker handles them uniformly.
+struct LiveRegSet {
+  SparseSet<unsigned> PhysRegs;
+  SparseSet<unsigned, VirtReg2IndexFunctor> VirtRegs;
 
   bool contains(unsigned Reg) const {
-    unsigned SparseIndex = getSparseIndexFromReg(Reg);
-    return Regs.count(SparseIndex);
+    if (TargetRegisterInfo::isVirtualRegister(Reg))
+      return VirtRegs.count(Reg);
+    return PhysRegs.count(Reg);
   }
 
   bool insert(unsigned Reg) {
-    unsigned SparseIndex = getSparseIndexFromReg(Reg);
-    return Regs.insert(SparseIndex).second;
+    if (TargetRegisterInfo::isVirtualRegister(Reg))
+      return VirtRegs.insert(Reg).second;
+    return PhysRegs.insert(Reg).second;
   }
 
   bool erase(unsigned Reg) {
-    unsigned SparseIndex = getSparseIndexFromReg(Reg);
-    return Regs.erase(SparseIndex);
-  }
-
-  size_t size() const {
-    return Regs.size();
-  }
-
-  template<typename ContainerT>
-  void appendTo(ContainerT &To) const {
-    for (unsigned I : Regs) {
-      unsigned Reg = getRegFromSparseIndex(I);
-      To.push_back(Reg);
-    }
+    if (TargetRegisterInfo::isVirtualRegister(Reg))
+      return VirtRegs.erase(Reg);
+    return PhysRegs.erase(Reg);
   }
 };
 
@@ -354,21 +300,16 @@ public:
   // position changes while pressure does not.
   void setPos(MachineBasicBlock::const_iterator Pos) { CurrPos = Pos; }
 
-  /// Recede across the previous instruction.
-  void recede(SmallVectorImpl<unsigned> *LiveUses = nullptr);
+  /// \brief Get the SlotIndex for the first nondebug instruction including or
+  /// after the current position.
+  SlotIndex getCurrSlot() const;
 
   /// Recede across the previous instruction.
-  /// This "low-level" variant assumes that recedeSkipDebugValues() was
-  /// called previously and takes precomputed RegisterOperands for the
-  /// instruction.
-  void recede(const RegisterOperands &RegOpers,
-              SmallVectorImpl<unsigned> *LiveUses = nullptr);
-
-  /// Recede until we find an instruction which is not a DebugValue.
-  void recedeSkipDebugValues();
+  bool recede(SmallVectorImpl<unsigned> *LiveUses = nullptr,
+              PressureDiff *PDiff = nullptr);
 
   /// Advance across the current instruction.
-  void advance();
+  bool advance();
 
   /// Finalize the region boundaries and recored live ins and live outs.
   void closeRegion();
@@ -385,15 +326,17 @@ public:
   ArrayRef<unsigned> getLiveThru() const { return LiveThruPressure; }
 
   /// Get the resulting register pressure over the traversed region.
-  /// This result is complete if closeRegion() was explicitly invoked.
+  /// This result is complete if either advance() or recede() has returned true,
+  /// or if closeRegion() was explicitly invoked.
   RegisterPressure &getPressure() { return P; }
   const RegisterPressure &getPressure() const { return P; }
 
   /// Get the register set pressure at the current position, which may be less
   /// than the pressure across the traversed region.
-  const std::vector<unsigned> &getRegSetPressureAtPos() const {
-    return CurrSetPressure;
-  }
+  std::vector<unsigned> &getRegSetPressureAtPos() { return CurrSetPressure; }
+
+  void discoverLiveOut(unsigned Reg);
+  void discoverLiveIn(unsigned Reg);
 
   bool isTopClosed() const;
   bool isBottomClosed() const;
@@ -469,12 +412,7 @@ public:
   void dump() const;
 
 protected:
-  void discoverLiveOut(unsigned Reg);
-  void discoverLiveIn(unsigned Reg);
-
-  /// \brief Get the SlotIndex for the first nondebug instruction including or
-  /// after the current position.
-  SlotIndex getCurrSlot() const;
+  const LiveRange *getLiveRange(unsigned Reg) const;
 
   void increaseRegPressure(ArrayRef<unsigned> Regs);
   void decreaseRegPressure(ArrayRef<unsigned> Regs);

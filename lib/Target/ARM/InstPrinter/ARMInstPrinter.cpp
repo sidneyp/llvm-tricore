@@ -19,7 +19,6 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -805,7 +804,7 @@ void ARMInstPrinter::printMSRMaskOperand(const MCInst *MI, unsigned OpNum,
     unsigned Opcode = MI->getOpcode();
 
     // For writes, handle extended mask bits if the DSP extension is present.
-    if (Opcode == ARM::t2MSR_M && FeatureBits[ARM::FeatureDSP]) {
+    if (Opcode == ARM::t2MSR_M && FeatureBits[ARM::FeatureDSPThumb2]) {
       switch (SYSm) {
       case 0x400:
         O << "apsr_g";

@@ -281,7 +281,6 @@ public:
                                 ICmpInst::Predicate Pred);
   Instruction *FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
                            ICmpInst::Predicate Cond, Instruction &I);
-  Instruction *FoldAllocaCmp(ICmpInst &ICI, AllocaInst *Alloca, Value *Other);
   Instruction *FoldShiftByConstant(Value *Op0, Constant *Op1,
                                    BinaryOperator &I);
   Instruction *commonCastTransforms(CastInst &CI);
@@ -342,7 +341,6 @@ public:
                                  const unsigned SIOpd);
 
 private:
-  bool ShouldChangeType(unsigned FromBitWidth, unsigned ToBitWidth) const;
   bool ShouldChangeType(Type *From, Type *To) const;
   Value *dyn_castNegVal(Value *V) const;
   Value *dyn_castFNegVal(Value *V, bool NoSignedZero = false) const;
@@ -361,11 +359,6 @@ private:
 
   /// \brief Try to optimize a sequence of instructions checking if an operation
   /// on LHS and RHS overflows.
-  ///
-  /// If this overflow check is done via one of the overflow check intrinsics,
-  /// then CtxI has to be the call instruction calling that intrinsic.  If this
-  /// overflow check is done by arithmetic followed by a compare, then CtxI has
-  /// to be the arithmetic instruction.
   ///
   /// If a simplification is possible, stores the simplified result of the
   /// operation in OperationResult and result of the overflow check in
@@ -400,7 +393,7 @@ public:
     assert(New && !New->getParent() &&
            "New instruction already inserted into a basic block!");
     BasicBlock *BB = Old.getParent();
-    BB->getInstList().insert(Old.getIterator(), New); // Insert inst
+    BB->getInstList().insert(&Old, New); // Insert inst
     Worklist.Add(New);
     return New;
   }
@@ -414,7 +407,7 @@ public:
   /// \brief A combiner-aware RAUW-like routine.
   ///
   /// This method is to be used when an instruction is found to be dead,
-  /// replaceable with another preexisting expression. Here we add all uses of
+  /// replacable with another preexisting expression. Here we add all uses of
   /// I to the worklist, replace all uses of I with the new value, then return
   /// I, so that the inst combiner will know that I was modified.
   Instruction *ReplaceInstUsesWith(Instruction &I, Value *V) {
@@ -546,7 +539,6 @@ private:
   Instruction *FoldPHIArgBinOpIntoPHI(PHINode &PN);
   Instruction *FoldPHIArgGEPIntoPHI(PHINode &PN);
   Instruction *FoldPHIArgLoadIntoPHI(PHINode &PN);
-  Instruction *FoldPHIArgZextsIntoPHI(PHINode &PN);
 
   Instruction *OptAndOp(Instruction *Op, ConstantInt *OpRHS,
                         ConstantInt *AndRHS, BinaryOperator &TheAnd);
@@ -556,7 +548,7 @@ private:
   Value *InsertRangeTest(Value *V, Constant *Lo, Constant *Hi, bool isSigned,
                          bool Inside);
   Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
-  Instruction *MatchBSwapOrBitReverse(BinaryOperator &I);
+  Instruction *MatchBSwap(BinaryOperator &I);
   bool SimplifyStoreAtEndOfBlock(StoreInst &SI);
   Instruction *SimplifyMemTransfer(MemIntrinsic *MI);
   Instruction *SimplifyMemSet(MemSetInst *MI);

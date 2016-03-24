@@ -64,7 +64,7 @@ int SparcSubtarget::getAdjustedFrameSize(int frameSize) const {
     frameSize += 128;
     // Frames with calls must also reserve space for 6 outgoing arguments
     // whether they are used or not. LowerCall_64 takes care of that.
-    frameSize = RoundUpToAlignment(frameSize, 16);
+    assert(frameSize % 16 == 0 && "Stack size not 16-byte aligned");
   } else {
     // Emit the correct save instruction based on the number of bytes in
     // the frame. Minimum stack frame size according to V8 ABI is:
@@ -80,8 +80,4 @@ int SparcSubtarget::getAdjustedFrameSize(int frameSize) const {
     frameSize = RoundUpToAlignment(frameSize, 8);
   }
   return frameSize;
-}
-
-bool SparcSubtarget::enableMachineScheduler() const {
-  return true;
 }

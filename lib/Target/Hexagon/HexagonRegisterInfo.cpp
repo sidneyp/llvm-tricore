@@ -66,8 +66,6 @@ HexagonRegisterInfo::getCallerSavedRegs(const MachineFunction *MF) const {
   switch (HST.getHexagonArchVersion()) {
   case HexagonSubtarget::V4:
   case HexagonSubtarget::V5:
-  case HexagonSubtarget::V55:
-  case HexagonSubtarget::V60:
     return CallerSavedRegsV4;
   }
   llvm_unreachable(
@@ -86,8 +84,6 @@ HexagonRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   switch (MF->getSubtarget<HexagonSubtarget>().getHexagonArchVersion()) {
   case HexagonSubtarget::V4:
   case HexagonSubtarget::V5:
-  case HexagonSubtarget::V55:
-  case HexagonSubtarget::V60:
     return CalleeSavedRegsV3;
   }
   llvm_unreachable("Callee saved registers requested for unknown architecture "
@@ -102,8 +98,6 @@ BitVector HexagonRegisterInfo::getReservedRegs(const MachineFunction &MF)
   Reserved.set(Hexagon::R29);
   Reserved.set(Hexagon::R30);
   Reserved.set(Hexagon::R31);
-  Reserved.set(Hexagon::PC);
-  Reserved.set(Hexagon::GP);
   Reserved.set(Hexagon::D14);
   Reserved.set(Hexagon::D15);
   Reserved.set(Hexagon::LC0);
@@ -122,21 +116,62 @@ void HexagonRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   assert(SPAdj == 0 && "Unexpected");
 
   MachineInstr &MI = *II;
+
   MachineBasicBlock &MB = *MI.getParent();
   MachineFunction &MF = *MB.getParent();
-  auto &HST = MF.getSubtarget<HexagonSubtarget>();
+  MachineFrameInfo &MFI = *MF.getFrameInfo();
+  auto &HST = static_cast<const HexagonSubtarget&>(MF.getSubtarget());
   auto &HII = *HST.getInstrInfo();
   auto &HFI = *HST.getFrameLowering();
 
-  unsigned BP = 0;
   int FI = MI.getOperand(FIOp).getIndex();
-  // Select the base pointer (BP) and calculate the actual offset from BP
-  // to the beginning of the object at index FI.
-  int Offset = HFI.getFrameIndexReference(MF, FI, BP);
-  // Add the offset from the instruction.
-  int RealOffset = Offset + MI.getOperand(FIOp+1).getImm();
+  int Offset = MFI.getObjectOffset(FI) + MI.getOperand(FIOp+1).getImm();
+  bool HasAlloca = MFI.hasVarSizedObjects();
+  bool HasAlign = needsStackRealignment(MF);
+
+  // XXX: Fixed objects cannot be accessed through SP if there are aligned
+  // objects in the local frame, or if there are dynamically allocated objects.
+  // In such cases, there has to be FP available.
+  if (!HFI.hasFP(MF)) {
+    assert(!HasAlloca && !HasAlign && "This function must have frame pointer");
+    // We will not reserve space on the stack for the lr and fp registers.
+    Offset -= 8;
+  }
+
+  unsigned SP = getStackRegister(), FP = getFrameRegister();
+  unsigned AP = 0;
+  if (MachineInstr *AI = HFI.getAlignaInstr(MF))
+    AP = AI->getOperand(0).getReg();
+  unsigned FrameSize = MFI.getStackSize();
+
+  // Special handling of dbg_value instructions and INLINEASM.
+  if (MI.isDebugValue() || MI.isInlineAsm()) {
+    MI.getOperand(FIOp).ChangeToRegister(SP, false /*isDef*/);
+    MI.getOperand(FIOp+1).ChangeToImmediate(Offset+FrameSize);
+    return;
+  }
+
+  bool UseFP = false, UseAP = false;  // Default: use SP.
+  if (MFI.isFixedObjectIndex(FI) || MFI.isObjectPreAllocated(FI)) {
+    UseFP = HasAlloca || HasAlign;
+  } else {
+    if (HasAlloca) {
+      if (HasAlign)
+        UseAP = true;
+      else
+        UseFP = true;
+    }
+  }
 
   unsigned Opc = MI.getOpcode();
+  bool ValidSP = HII.isValidOffset(Opc, FrameSize+Offset);
+  bool ValidFP = HII.isValidOffset(Opc, Offset);
+
+  // Calculate the actual offset in the instruction.
+  int64_t RealOffset = Offset;
+  if (!UseFP && !UseAP)
+    RealOffset = FrameSize+Offset;
+
   switch (Opc) {
     case Hexagon::TFR_FIA:
       MI.setDesc(HII.get(Hexagon::A2_addi));
@@ -149,7 +184,20 @@ void HexagonRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       break;
   }
 
-  if (HII.isValidOffset(Opc, RealOffset)) {
+  unsigned BP = 0;
+  bool Valid = false;
+  if (UseFP) {
+    BP = FP;
+    Valid = ValidFP;
+  } else if (UseAP) {
+    BP = AP;
+    Valid = ValidFP;
+  } else {
+    BP = SP;
+    Valid = ValidSP;
+  }
+
+  if (Valid) {
     MI.getOperand(FIOp).ChangeToRegister(BP, false);
     MI.getOperand(FIOp+1).ChangeToImmediate(RealOffset);
     return;
@@ -175,8 +223,8 @@ unsigned HexagonRegisterInfo::getFrameRegister(const MachineFunction
                                                &MF) const {
   const HexagonFrameLowering *TFI = getFrameLowering(MF);
   if (TFI->hasFP(MF))
-    return getFrameRegister();
-  return getStackRegister();
+    return Hexagon::R30;
+  return Hexagon::R29;
 }
 
 
@@ -190,9 +238,17 @@ unsigned HexagonRegisterInfo::getStackRegister() const {
 }
 
 
-bool HexagonRegisterInfo::useFPForScavengingIndex(const MachineFunction &MF)
-      const {
-  return MF.getSubtarget<HexagonSubtarget>().getFrameLowering()->hasFP(MF);
+bool
+HexagonRegisterInfo::useFPForScavengingIndex(const MachineFunction &MF) const {
+  const HexagonFrameLowering *TFI = getFrameLowering(MF);
+  return TFI->hasFP(MF);
+}
+
+
+bool
+HexagonRegisterInfo::needsStackRealignment(const MachineFunction &MF) const {
+  const MachineFrameInfo *MFI = MF.getFrameInfo();
+  return MFI->getMaxAlignment() > 8;
 }
 
 

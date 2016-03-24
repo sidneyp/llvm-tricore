@@ -174,18 +174,18 @@ namespace llvm {
 
   bool
    isProfitableToDupForIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
-                             BranchProbability Probability) const override;
+                             const BranchProbability &Probability) const override;
 
   bool isProfitableToIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
                            unsigned ExtraPredCycles,
-                           BranchProbability Probability) const override ;
+                           const BranchProbability &Probability) const override ;
 
   bool
    isProfitableToIfCvt(MachineBasicBlock &TMBB,
                        unsigned NumTCycles, unsigned ExtraTCycles,
                        MachineBasicBlock &FMBB,
                        unsigned NumFCycles, unsigned ExtraFCycles,
-                       BranchProbability Probability) const override;
+                       const BranchProbability &Probability) const override;
 
   bool DefinesPredicate(MachineInstr *MI,
                                   std::vector<MachineOperand> &Pred) const override;

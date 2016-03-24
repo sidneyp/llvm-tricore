@@ -33,7 +33,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
-
 using namespace llvm;
 
 static Function *CreateFibFunction(Module *M, LLVMContext &Context) {
@@ -42,7 +41,7 @@ static Function *CreateFibFunction(Module *M, LLVMContext &Context) {
   Function *FibF =
     cast<Function>(M->getOrInsertFunction("fib", Type::getInt32Ty(Context),
                                           Type::getInt32Ty(Context),
-                                          nullptr));
+                                          (Type *)0));
 
   // Add a basic block to the function.
   BasicBlock *BB = BasicBlock::Create(Context, "EntryBlock", FibF);
@@ -52,7 +51,7 @@ static Function *CreateFibFunction(Module *M, LLVMContext &Context) {
   Value *Two = ConstantInt::get(Type::getInt32Ty(Context), 2);
 
   // Get pointer to the integer argument of the add1 function...
-  Argument *ArgX = &*FibF->arg_begin(); // Get the arg.
+  Argument *ArgX = FibF->arg_begin();   // Get the arg.
   ArgX->setName("AnArg");            // Give it a nice symbolic name for fun.
 
   // Create the true_block.
@@ -88,6 +87,7 @@ static Function *CreateFibFunction(Module *M, LLVMContext &Context) {
   return FibF;
 }
 
+
 int main(int argc, char **argv) {
   int n = argc > 1 ? atol(argv[1]) : 24;
 
@@ -106,6 +106,7 @@ int main(int argc, char **argv) {
   ExecutionEngine *EE =
     EngineBuilder(std::move(Owner))
     .setErrorStr(&errStr)
+    .setEngineKind(EngineKind::JIT)
     .create();
 
   if (!EE) {

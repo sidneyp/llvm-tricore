@@ -22,9 +22,9 @@ using namespace PatternMatch;
 #define DEBUG_TYPE "instcombine"
 
 
-/// The specific integer value is used in a context where it is known to be
-/// non-zero.  If this allows us to simplify the computation, do so and return
-/// the new operand, otherwise return null.
+/// simplifyValueKnownNonZero - The specific integer value is used in a context
+/// where it is known to be non-zero.  If this allows us to simplify the
+/// computation, do so and return the new operand, otherwise return null.
 static Value *simplifyValueKnownNonZero(Value *V, InstCombiner &IC,
                                         Instruction &CxtI) {
   // If V has multiple uses, then we would have to do more analysis to determine
@@ -76,7 +76,8 @@ static Value *simplifyValueKnownNonZero(Value *V, InstCombiner &IC,
 }
 
 
-/// True if the multiply can not be expressed in an int this size.
+/// MultiplyOverflows - True if the multiply can not be expressed in an int
+/// this size.
 static bool MultiplyOverflows(const APInt &C1, const APInt &C2, APInt &Product,
                               bool IsSigned) {
   bool Overflow;
@@ -93,14 +94,6 @@ static bool IsMultiple(const APInt &C1, const APInt &C2, APInt &Quotient,
                        bool IsSigned) {
   assert(C1.getBitWidth() == C2.getBitWidth() &&
          "Inconsistent width of constants!");
-
-  // Bail if we will divide by zero.
-  if (C2.isMinValue())
-    return false;
-
-  // Bail if we would divide INT_MIN by -1.
-  if (IsSigned && C1.isMinSignedValue() && C2.isAllOnesValue())
-    return false;
 
   APInt Remainder(C1.getBitWidth(), /*Val=*/0ULL, IsSigned);
   if (IsSigned)
@@ -636,7 +629,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
     // if pattern detected emit alternate sequence
     if (OpX && OpY) {
       BuilderTy::FastMathFlagGuard Guard(*Builder);
-      Builder->setFastMathFlags(Log2->getFastMathFlags());
+      Builder->SetFastMathFlags(Log2->getFastMathFlags());
       Log2->setArgOperand(0, OpY);
       Value *FMulVal = Builder->CreateFMul(OpX, Log2);
       Value *FSub = Builder->CreateFSub(FMulVal, OpX);
@@ -652,7 +645,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
     bool IgnoreZeroSign = I.hasNoSignedZeros();
     if (BinaryOperator::isFNeg(Opnd0, IgnoreZeroSign)) {
       BuilderTy::FastMathFlagGuard Guard(*Builder);
-      Builder->setFastMathFlags(I.getFastMathFlags());
+      Builder->SetFastMathFlags(I.getFastMathFlags());
 
       Value *N0 = dyn_castFNegVal(Opnd0, IgnoreZeroSign);
       Value *N1 = dyn_castFNegVal(Opnd1, IgnoreZeroSign);
@@ -693,7 +686,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
 
         if (Y) {
           BuilderTy::FastMathFlagGuard Guard(*Builder);
-          Builder->setFastMathFlags(I.getFastMathFlags());
+          Builder->SetFastMathFlags(I.getFastMathFlags());
           Value *T = Builder->CreateFMul(Opnd1, Opnd1);
 
           Value *R = Builder->CreateFMul(T, Y);
@@ -712,7 +705,8 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
   return Changed ? &I : nullptr;
 }
 
-/// Try to fold a divide or remainder of a select instruction.
+/// SimplifyDivRemOfSelect - Try to fold a divide or remainder of a select
+/// instruction.
 bool InstCombiner::SimplifyDivRemOfSelect(BinaryOperator &I) {
   SelectInst *SI = cast<SelectInst>(I.getOperand(1));
 
@@ -746,7 +740,7 @@ bool InstCombiner::SimplifyDivRemOfSelect(BinaryOperator &I) {
     return true;
 
   // Scan the current block backward, looking for other uses of SI.
-  BasicBlock::iterator BBI = I.getIterator(), BBFront = I.getParent()->begin();
+  BasicBlock::iterator BBI = &I, BBFront = I.getParent()->begin();
 
   while (BBI != BBFront) {
     --BBI;
@@ -760,10 +754,10 @@ bool InstCombiner::SimplifyDivRemOfSelect(BinaryOperator &I) {
          I != E; ++I) {
       if (*I == SI) {
         *I = SI->getOperand(NonNullOperand);
-        Worklist.Add(&*BBI);
+        Worklist.Add(BBI);
       } else if (*I == SelectCond) {
         *I = Builder->getInt1(NonNullOperand == 1);
-        Worklist.Add(&*BBI);
+        Worklist.Add(BBI);
       }
     }
 

@@ -8,13 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
-#include "llvm/Analysis/AssumptionCache.h"
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -28,23 +24,16 @@ namespace {
 // deleting the PassManager.
 class ScalarEvolutionsTest : public testing::Test {
 protected:
+  ScalarEvolutionsTest() : M("", Context), SE(*new ScalarEvolution) {}
+  ~ScalarEvolutionsTest() override {
+    // Manually clean up, since we allocated new SCEV objects after the
+    // pass was finished.
+    SE.releaseMemory();
+  }
   LLVMContext Context;
   Module M;
-  TargetLibraryInfoImpl TLII;
-  TargetLibraryInfo TLI;
-
-  std::unique_ptr<AssumptionCache> AC;
-  std::unique_ptr<DominatorTree> DT;
-  std::unique_ptr<LoopInfo> LI;
-
-  ScalarEvolutionsTest() : M("", Context), TLII(), TLI(TLII) {}
-
-  ScalarEvolution buildSE(Function &F) {
-    AC.reset(new AssumptionCache(F));
-    DT.reset(new DominatorTree(F));
-    LI.reset(new LoopInfo(*DT));
-    return ScalarEvolution(F, TLI, *AC, *DT, *LI);
-  }
+  legacy::PassManager PM;
+  ScalarEvolution &SE;
 };
 
 TEST_F(ScalarEvolutionsTest, SCEVUnknownRAUW) {
@@ -60,7 +49,9 @@ TEST_F(ScalarEvolutionsTest, SCEVUnknownRAUW) {
   Value *V1 = new GlobalVariable(M, Ty, false, GlobalValue::ExternalLinkage, Init, "V1");
   Value *V2 = new GlobalVariable(M, Ty, false, GlobalValue::ExternalLinkage, Init, "V2");
 
-  ScalarEvolution SE = buildSE(*F);
+  // Create a ScalarEvolution and "run" it so that it gets initialized.
+  PM.add(&SE);
+  PM.run(M);
 
   const SCEV *S0 = SE.getSCEV(V0);
   const SCEV *S1 = SE.getSCEV(V1);
@@ -105,7 +96,9 @@ TEST_F(ScalarEvolutionsTest, SCEVMultiplyAddRecs) {
   BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
   ReturnInst::Create(Context, nullptr, BB);
 
-  ScalarEvolution SE = buildSE(*F);
+  // Create a ScalarEvolution and "run" it so that it gets initialized.
+  PM.add(&SE);
+  PM.run(M);
 
   // It's possible to produce an empty loop through the default constructor,
   // but you can't add any blocks to it without a LoopInfo pass.

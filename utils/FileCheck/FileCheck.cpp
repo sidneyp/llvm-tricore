@@ -399,15 +399,15 @@ size_t Pattern::Match(StringRef Buffer, size_t &MatchLen,
     TmpStr = RegExStr;
 
     unsigned InsertOffset = 0;
-    for (const auto &VariableUse : VariableUses) {
+    for (unsigned i = 0, e = VariableUses.size(); i != e; ++i) {
       std::string Value;
 
-      if (VariableUse.first[0] == '@') {
-        if (!EvaluateExpression(VariableUse.first, Value))
+      if (VariableUses[i].first[0] == '@') {
+        if (!EvaluateExpression(VariableUses[i].first, Value))
           return StringRef::npos;
       } else {
         StringMap<StringRef>::iterator it =
-            VariableTable.find(VariableUse.first);
+          VariableTable.find(VariableUses[i].first);
         // If the variable is undefined, return an error.
         if (it == VariableTable.end())
           return StringRef::npos;
@@ -417,7 +417,7 @@ size_t Pattern::Match(StringRef Buffer, size_t &MatchLen,
       }
 
       // Plop it into the regex at the adjusted offset.
-      TmpStr.insert(TmpStr.begin() + VariableUse.second + InsertOffset,
+      TmpStr.insert(TmpStr.begin()+VariableUses[i].second+InsertOffset,
                     Value.begin(), Value.end());
       InsertOffset += Value.size();
     }
@@ -436,9 +436,11 @@ size_t Pattern::Match(StringRef Buffer, size_t &MatchLen,
   StringRef FullMatch = MatchInfo[0];
 
   // If this defines any variables, remember their values.
-  for (const auto &VariableDef : VariableDefs) {
-    assert(VariableDef.second < MatchInfo.size() && "Internal paren error");
-    VariableTable[VariableDef.first] = MatchInfo[VariableDef.second];
+  for (std::map<StringRef, unsigned>::const_iterator I = VariableDefs.begin(),
+                                                     E = VariableDefs.end();
+       I != E; ++I) {
+    assert(I->second < MatchInfo.size() && "Internal paren error");
+    VariableTable[I->first] = MatchInfo[I->second];
   }
 
   MatchLen = FullMatch.size();
@@ -468,10 +470,10 @@ void Pattern::PrintFailureInfo(const SourceMgr &SM, StringRef Buffer,
   // If this was a regular expression using variables, print the current
   // variable values.
   if (!VariableUses.empty()) {
-    for (const auto &VariableUse : VariableUses) {
+    for (unsigned i = 0, e = VariableUses.size(); i != e; ++i) {
       SmallString<256> Msg;
       raw_svector_ostream OS(Msg);
-      StringRef Var = VariableUse.first;
+      StringRef Var = VariableUses[i].first;
       if (Var[0] == '@') {
         std::string Value;
         if (EvaluateExpression(Var, Value)) {
@@ -759,7 +761,9 @@ static StringRef FindFirstCandidateMatch(StringRef &Buffer,
   CheckTy = Check::CheckNone;
   CheckLoc = StringRef::npos;
 
-  for (StringRef Prefix : CheckPrefixes) {
+  for (prefix_iterator I = CheckPrefixes.begin(), E = CheckPrefixes.end();
+       I != E; ++I) {
+    StringRef Prefix(*I);
     size_t PrefixLoc = Buffer.find(Prefix);
 
     if (PrefixLoc == StringRef::npos)
@@ -857,7 +861,7 @@ static bool ReadCheckFile(SourceMgr &SM,
   for (const auto &PatternString : ImplicitCheckNot) {
     // Create a buffer with fake command line content in order to display the
     // command line option responsible for the specific implicit CHECK-NOT.
-    std::string Prefix = (Twine("-") + ImplicitCheckNot.ArgStr + "='").str();
+    std::string Prefix = std::string("-") + ImplicitCheckNot.ArgStr + "='";
     std::string Suffix = "'";
     std::unique_ptr<MemoryBuffer> CmdLine = MemoryBuffer::getMemBufferCopy(
         Prefix + PatternString + Suffix, "command line");
@@ -975,7 +979,7 @@ static bool ReadCheckFile(SourceMgr &SM,
   return false;
 }
 
-static void PrintCheckFailed(const SourceMgr &SM, SMLoc Loc,
+static void PrintCheckFailed(const SourceMgr &SM, const SMLoc &Loc,
                              const Pattern &Pat, StringRef Buffer,
                              StringMap<StringRef> &VariableTable) {
   // Otherwise, we have an error, emit an error message.
@@ -1142,7 +1146,9 @@ bool CheckString::CheckSame(const SourceMgr &SM, StringRef Buffer) const {
 bool CheckString::CheckNot(const SourceMgr &SM, StringRef Buffer,
                            const std::vector<const Pattern *> &NotStrings,
                            StringMap<StringRef> &VariableTable) const {
-  for (const Pattern *Pat : NotStrings) {
+  for (unsigned ChunkNo = 0, e = NotStrings.size();
+       ChunkNo != e; ++ChunkNo) {
+    const Pattern *Pat = NotStrings[ChunkNo];
     assert((Pat->getCheckTy() == Check::CheckNot) && "Expect CHECK-NOT!");
 
     size_t MatchLen = 0;
@@ -1170,7 +1176,10 @@ size_t CheckString::CheckDag(const SourceMgr &SM, StringRef Buffer,
   size_t LastPos = 0;
   size_t StartPos = LastPos;
 
-  for (const Pattern &Pat : DagNotStrings) {
+  for (unsigned ChunkNo = 0, e = DagNotStrings.size();
+       ChunkNo != e; ++ChunkNo) {
+    const Pattern &Pat = DagNotStrings[ChunkNo];
+
     assert((Pat.getCheckTy() == Check::CheckDAG ||
             Pat.getCheckTy() == Check::CheckNot) &&
            "Invalid CHECK-DAG or CHECK-NOT!");
@@ -1244,7 +1253,10 @@ static bool ValidateCheckPrefix(StringRef CheckPrefix) {
 static bool ValidateCheckPrefixes() {
   StringSet<> PrefixSet;
 
-  for (StringRef Prefix : CheckPrefixes) {
+  for (prefix_iterator I = CheckPrefixes.begin(), E = CheckPrefixes.end();
+       I != E; ++I) {
+    StringRef Prefix(*I);
+
     // Reject empty prefixes.
     if (Prefix == "")
       return false;

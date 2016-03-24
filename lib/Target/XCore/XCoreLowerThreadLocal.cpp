@@ -228,9 +228,12 @@ bool XCoreLowerThreadLocal::runOnModule(Module &M) {
   // Find thread local globals.
   bool MadeChange = false;
   SmallVector<GlobalVariable *, 16> ThreadLocalGlobals;
-  for (GlobalVariable &GV : M.globals())
-    if (GV.isThreadLocal())
-      ThreadLocalGlobals.push_back(&GV);
+  for (Module::global_iterator GVI = M.global_begin(), E = M.global_end();
+       GVI != E; ++GVI) {
+    GlobalVariable *GV = GVI;
+    if (GV->isThreadLocal())
+      ThreadLocalGlobals.push_back(GV);
+  }
   for (unsigned I = 0, E = ThreadLocalGlobals.size(); I != E; ++I) {
     MadeChange |= lowerGlobal(ThreadLocalGlobals[I]);
   }

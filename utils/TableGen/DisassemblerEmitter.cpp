@@ -134,7 +134,7 @@ void EmitDisassembler(RecordKeeper &Records, raw_ostream &OS) {
       PredicateNamespace = "ARM";
 
     EmitFixedLenDecoder(Records, OS, PredicateNamespace,
-                        "if (!Check(S, ", "))",
+                        "if (!Check(S, ", ")) return MCDisassembler::Fail;",
                         "S", "MCDisassembler::Fail",
                         "  MCDisassembler::DecodeStatus S = "
                           "MCDisassembler::Success;\n(void)S;");
@@ -142,7 +142,8 @@ void EmitDisassembler(RecordKeeper &Records, raw_ostream &OS) {
   }
 
   EmitFixedLenDecoder(Records, OS, Target.getName(),
-                      "if (", " == MCDisassembler::Fail)",
+                      "if (", " == MCDisassembler::Fail)"
+                       " return MCDisassembler::Fail;",
                       "MCDisassembler::Success", "MCDisassembler::Fail", "");
 }
 

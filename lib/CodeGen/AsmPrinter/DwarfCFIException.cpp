@@ -78,11 +78,12 @@ void DwarfCFIException::endModule() {
     return;
 
   // Emit references to all used personality functions
-  for (const Function *Personality : MMI->getPersonalities()) {
-    if (!Personality)
+  const std::vector<const Function*> &Personalities = MMI->getPersonalities();
+  for (size_t i = 0, e = Personalities.size(); i != e; ++i) {
+    if (!Personalities[i])
       continue;
-    MCSymbol *Sym = Asm->getSymbol(Personality);
-    TLOF.emitPersonalityValue(*Asm->OutStreamer, Asm->getDataLayout(), Sym);
+    MCSymbol *Sym = Asm->getSymbol(Personalities[i]);
+    TLOF.emitPersonalityValue(*Asm->OutStreamer, Asm->TM, Sym);
   }
 }
 
@@ -107,6 +108,7 @@ void DwarfCFIException::beginFunction(const MachineFunction *MF) {
   const Function *Per = nullptr;
   if (F->hasPersonalityFn())
     Per = dyn_cast<Function>(F->getPersonalityFn()->stripPointerCasts());
+  assert(!MMI->getPersonality() || Per == MMI->getPersonality());
 
   // Emit a personality function even when there are no landing pads
   bool forceEmitPersonality =

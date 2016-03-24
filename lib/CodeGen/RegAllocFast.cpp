@@ -799,9 +799,10 @@ void RAFast::AllocateBasicBlock() {
   MachineBasicBlock::iterator MII = MBB->begin();
 
   // Add live-in registers as live.
-  for (const auto &LI : MBB->liveins())
-    if (MRI->isAllocatable(LI.PhysReg))
-      definePhysReg(MII, LI.PhysReg, regReserved);
+  for (MachineBasicBlock::livein_iterator I = MBB->livein_begin(),
+         E = MBB->livein_end(); I != E; ++I)
+    if (MRI->isAllocatable(*I))
+      definePhysReg(MII, *I, regReserved);
 
   SmallVector<unsigned, 8> VirtDead;
   SmallVector<MachineInstr*, 32> Coalesced;
@@ -985,6 +986,10 @@ void RAFast::AllocateBasicBlock() {
       }
     }
 
+    for (UsedInInstrSet::iterator
+         I = UsedInInstr.begin(), E = UsedInInstr.end(); I != E; ++I)
+      MRI->setRegUnitUsed(*I);
+
     // Track registers defined by instruction - early clobbers and tied uses at
     // this point.
     UsedInInstr.clear();
@@ -1002,13 +1007,11 @@ void RAFast::AllocateBasicBlock() {
 
     unsigned DefOpEnd = MI->getNumOperands();
     if (MI->isCall()) {
-      // Spill all virtregs before a call. This serves one purpose: If an
+      // Spill all virtregs before a call. This serves two purposes: 1. If an
       // exception is thrown, the landing pad is going to expect to find
-      // registers in their spill slots.
-      // Note: although this is appealing to just consider all definitions
-      // as call-clobbered, this is not correct because some of those
-      // definitions may be used later on and we do not want to reuse
-      // those for virtual registers in between.
+      // registers in their spill slots, and 2. we don't have to wade through
+      // all the <imp-def> operands on the call instruction.
+      DefOpEnd = VirtOpEnd;
       DEBUG(dbgs() << "  Spilling remaining registers before call.\n");
       spillAll(MI);
 
@@ -1046,6 +1049,10 @@ void RAFast::AllocateBasicBlock() {
     for (unsigned i = 0, e = VirtDead.size(); i != e; ++i)
       killVirtReg(VirtDead[i]);
     VirtDead.clear();
+
+    for (UsedInInstrSet::iterator
+         I = UsedInInstr.begin(), E = UsedInInstr.end(); I != E; ++I)
+      MRI->setRegUnitUsed(*I);
 
     if (CopyDst && CopyDst == CopySrc && CopyDstSub == CopySrcSub) {
       DEBUG(dbgs() << "-- coalescing: " << *MI);
@@ -1095,6 +1102,12 @@ bool RAFast::runOnMachineFunction(MachineFunction &Fn) {
     MBB = &*MBBi;
     AllocateBasicBlock();
   }
+
+  // Add the clobber lists for all the instructions we skipped earlier.
+  for (const MCInstrDesc *Desc : SkippedInstrs)
+    if (const uint16_t *Defs = Desc->getImplicitDefs())
+      while (*Defs)
+        MRI->setPhysRegUsed(*Defs++);
 
   // All machine operands and other references to virtual registers have been
   // replaced. Remove the virtual registers.

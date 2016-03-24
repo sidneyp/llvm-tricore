@@ -22,26 +22,18 @@
 #include "llvm/Support/MathExtras.h"
 using namespace llvm;
 
-namespace llvm {
-void initializeAArch64ExpandPseudoPass(PassRegistry &);
-}
-
-#define AARCH64_EXPAND_PSEUDO_NAME "AArch64 pseudo instruction expansion pass"
-
 namespace {
 class AArch64ExpandPseudo : public MachineFunctionPass {
 public:
   static char ID;
-  AArch64ExpandPseudo() : MachineFunctionPass(ID) {
-    initializeAArch64ExpandPseudoPass(*PassRegistry::getPassRegistry());
-  }
+  AArch64ExpandPseudo() : MachineFunctionPass(ID) {}
 
   const AArch64InstrInfo *TII;
 
   bool runOnMachineFunction(MachineFunction &Fn) override;
 
   const char *getPassName() const override {
-    return AARCH64_EXPAND_PSEUDO_NAME;
+    return "AArch64 pseudo instruction expansion pass";
   }
 
 private:
@@ -52,9 +44,6 @@ private:
 };
 char AArch64ExpandPseudo::ID = 0;
 }
-
-INITIALIZE_PASS(AArch64ExpandPseudo, "aarch64-expand-pseudo",
-                AARCH64_EXPAND_PSEUDO_NAME, false, false)
 
 /// \brief Transfer implicit operands on the pseudo instruction to the
 /// instructions created from the expansion.

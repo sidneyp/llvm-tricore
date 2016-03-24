@@ -52,7 +52,8 @@ const char *ARMConstantPoolValue::getModifierText() const {
     // strings if that's legal.
   case ARMCP::no_modifier: return "none";
   case ARMCP::TLSGD:       return "tlsgd";
-  case ARMCP::GOT_PREL:    return "GOT_PREL";
+  case ARMCP::GOT:         return "GOT";
+  case ARMCP::GOTOFF:      return "GOTOFF";
   case ARMCP::GOTTPOFF:    return "gottpoff";
   case ARMCP::TPOFF:       return "tpoff";
   }

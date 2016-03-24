@@ -21,7 +21,6 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -72,10 +71,10 @@ namespace {
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfoWrapperPass>();
       AU.addPreserved<LoopInfoWrapperPass>();
-      AU.addRequired<ScalarEvolutionWrapperPass>();
+      AU.addRequired<ScalarEvolution>();
       // FIXME: For some reason, preserving SE here breaks LSR (even if
       // this pass changes nothing).
-      // AU.addPreserved<ScalarEvolutionWrapperPass>();
+      // AU.addPreserved<ScalarEvolution>();
       AU.addRequired<TargetTransformInfoWrapperPass>();
     }
 
@@ -97,7 +96,7 @@ INITIALIZE_PASS_BEGIN(PPCLoopDataPrefetch, "ppc-loop-data-prefetch",
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_END(PPCLoopDataPrefetch, "ppc-loop-data-prefetch",
                     "PPC Loop Data Prefetch", false, false)
 
@@ -105,7 +104,7 @@ FunctionPass *llvm::createPPCLoopDataPrefetchPass() { return new PPCLoopDataPref
 
 bool PPCLoopDataPrefetch::runOnFunction(Function &F) {
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  SE = &getAnalysis<ScalarEvolution>();
   DL = &F.getParent()->getDataLayout();
   AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
   TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);

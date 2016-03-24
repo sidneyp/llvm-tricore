@@ -81,7 +81,6 @@ representation.
    GetElementPtr
    Frontend/PerformanceTips
    MCJITDesignAndImplementation
-   CompileCudaWithLLVM
 
 :doc:`GettingStarted`
    Discusses how to get up and running quickly with the LLVM infrastructure.
@@ -257,7 +256,6 @@ For API clients and LLVM developers.
    MergeFunctions
    BitSets
    FaultMaps
-   MIRLangRef
 
 :doc:`WritingAnLLVMPass`
    Information on how to write LLVM transformations and analyses.
@@ -269,10 +267,6 @@ For API clients and LLVM developers.
    The design and implementation of the LLVM code generator.  Useful if you are
    working on retargetting LLVM to a new architecture, designing a new codegen
    pass, or enhancing existing components.
-
-:doc:`Machine IR (MIR) Format Reference Manual <MIRLangRef>`
-   A reference manual for the MIR serialization format, which is used to test
-   LLVM's code generation passes.
 
 :doc:`TableGen <TableGen/index>`
    Describes the TableGen tool, which is used heavily by the LLVM code
@@ -366,9 +360,6 @@ For API clients and LLVM developers.
 
 :doc:`FaultMaps`
   LLVM support for folding control flow into faulting machine instructions.
-
-:doc:`CompileCudaWithLLVM`
-  LLVM support for CUDA.
 
 Development Process Documentation
 =================================

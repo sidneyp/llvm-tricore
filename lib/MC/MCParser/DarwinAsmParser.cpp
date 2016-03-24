@@ -8,13 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCParser/MCAsmParserExtension.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
 #include "llvm/MC/MCSectionMachO.h"
@@ -40,8 +37,6 @@ class DarwinAsmParser : public MCAsmParserExtension {
   bool parseSectionSwitch(const char *Segment, const char *Section,
                           unsigned TAA = 0, unsigned ImplicitAlign = 0,
                           unsigned StubSize = 0);
-
-  SMLoc LastVersionMinDirective;
 
 public:
   DarwinAsmParser() {}
@@ -169,14 +164,9 @@ public:
     addDirectiveHandler<&DarwinAsmParser::parseSectionDirectiveTLV>(".tlv");
 
     addDirectiveHandler<&DarwinAsmParser::parseSectionDirectiveIdent>(".ident");
-    addDirectiveHandler<&DarwinAsmParser::parseVersionMin>(
-      ".watchos_version_min");
-    addDirectiveHandler<&DarwinAsmParser::parseVersionMin>(".tvos_version_min");
     addDirectiveHandler<&DarwinAsmParser::parseVersionMin>(".ios_version_min");
     addDirectiveHandler<&DarwinAsmParser::parseVersionMin>(
       ".macosx_version_min");
-
-    LastVersionMinDirective = SMLoc();
   }
 
   bool parseDirectiveDesc(StringRef, SMLoc);
@@ -391,8 +381,9 @@ bool DarwinAsmParser::parseSectionSwitch(const char *Segment,
   // FIXME: Arch specific.
   bool isText = TAA & MachO::S_ATTR_PURE_INSTRUCTIONS;
   getStreamer().SwitchSection(getContext().getMachOSection(
-      Segment, Section, TAA, StubSize,
-      isText ? SectionKind::getText() : SectionKind::getData()));
+                                Segment, Section, TAA, StubSize,
+                                isText ? SectionKind::getText()
+                                       : SectionKind::getDataRel()));
 
   // Set the implicit alignment, if any.
   //
@@ -588,34 +579,12 @@ bool DarwinAsmParser::parseDirectiveSection(StringRef, SMLoc) {
   if (!ErrorStr.empty())
     return Error(Loc, ErrorStr.c_str());
 
-  // Issue a warning if the target is not powerpc and Section is a *coal* section.
-  Triple TT = getParser().getContext().getObjectFileInfo()->getTargetTriple();
-  Triple::ArchType ArchTy = TT.getArch();
-
-  if (ArchTy != Triple::ppc && ArchTy != Triple::ppc64) {
-    StringRef NonCoalSection = StringSwitch<StringRef>(Section)
-                                   .Case("__textcoal_nt", "__text")
-                                   .Case("__const_coal", "__const")
-                                   .Case("__datacoal_nt", "__data")
-                                   .Default(Section);
-
-    if (!Section.equals(NonCoalSection)) {
-      StringRef SectionVal(Loc.getPointer());
-      size_t B = SectionVal.find(',') + 1, E = SectionVal.find(',', B);
-      SMLoc BLoc = SMLoc::getFromPointer(SectionVal.data() + B);
-      SMLoc ELoc = SMLoc::getFromPointer(SectionVal.data() + E);
-      getParser().Warning(Loc, "section \"" + Section + "\" is deprecated",
-                          SMRange(BLoc, ELoc));
-      getParser().Note(Loc, "change section name to \"" + NonCoalSection +
-                       "\"", SMRange(BLoc, ELoc));
-    }
-  }
-
   // FIXME: Arch specific.
   bool isText = Segment == "__TEXT";  // FIXME: Hack.
   getStreamer().SwitchSection(getContext().getMachOSection(
-      Segment, Section, TAA, StubSize,
-      isText ? SectionKind::getText() : SectionKind::getData()));
+                                Segment, Section, TAA, StubSize,
+                                isText ? SectionKind::getText()
+                                : SectionKind::getDataRel()));
   return false;
 }
 
@@ -667,16 +636,17 @@ bool DarwinAsmParser::parseDirectiveSecureLogUnique(StringRef, SMLoc IDLoc) {
                  "environment variable unset.");
 
   // Open the secure log file if we haven't already.
-  raw_fd_ostream *OS = getContext().getSecureLog();
+  raw_ostream *OS = getContext().getSecureLog();
   if (!OS) {
     std::error_code EC;
-    auto NewOS = llvm::make_unique<raw_fd_ostream>(
-        SecureLogFile, EC, sys::fs::F_Append | sys::fs::F_Text);
-    if (EC)
+    OS = new raw_fd_ostream(SecureLogFile, EC,
+                            sys::fs::F_Append | sys::fs::F_Text);
+    if (EC) {
+       delete OS;
        return Error(IDLoc, Twine("can't open secure log file: ") +
                                SecureLogFile + " (" + EC.message() + ")");
-    OS = NewOS.get();
-    getContext().setSecureLog(std::move(NewOS));
+    }
+    getContext().setSecureLog(OS);
   }
 
   // Write the message.
@@ -897,11 +867,9 @@ bool DarwinAsmParser::parseDirectiveDataRegionEnd(StringRef, SMLoc) {
 /// parseVersionMin
 ///  ::= .ios_version_min major,minor[,update]
 ///  ::= .macosx_version_min major,minor[,update]
-bool DarwinAsmParser::parseVersionMin(StringRef Directive, SMLoc Loc) {
+bool DarwinAsmParser::parseVersionMin(StringRef Directive, SMLoc) {
   int64_t Major = 0, Minor = 0, Update = 0;
   int Kind = StringSwitch<int>(Directive)
-    .Case(".watchos_version_min", MCVM_WatchOSVersionMin)
-    .Case(".tvos_version_min", MCVM_TvOSVersionMin)
     .Case(".ios_version_min", MCVM_IOSVersionMin)
     .Case(".macosx_version_min", MCVM_OSXVersionMin);
   // Get the major version number.
@@ -933,24 +901,6 @@ bool DarwinAsmParser::parseVersionMin(StringRef Directive, SMLoc Loc) {
     return TokError("invalid OS update number");
     Lex();
   }
-
-  const Triple &T = getContext().getObjectFileInfo()->getTargetTriple();
-  Triple::OSType ExpectedOS = Triple::UnknownOS;
-  switch ((MCVersionMinType)Kind) {
-  case MCVM_WatchOSVersionMin: ExpectedOS = Triple::WatchOS; break;
-  case MCVM_TvOSVersionMin:    ExpectedOS = Triple::TvOS;    break;
-  case MCVM_IOSVersionMin:     ExpectedOS = Triple::IOS;     break;
-  case MCVM_OSXVersionMin:     ExpectedOS = Triple::MacOSX;  break;
-  }
-  if (T.getOS() != ExpectedOS)
-    Warning(Loc, Directive + " should only be used for " +
-            Triple::getOSTypeName(ExpectedOS) + " targets");
-
-  if (LastVersionMinDirective.isValid()) {
-    Warning(Loc, "overriding previous version_min directive");
-    Note(LastVersionMinDirective, "previous definition is here");
-  }
-  LastVersionMinDirective = Loc;
 
   // We've parsed a correct version specifier, so send it to the streamer.
   getStreamer().EmitVersionMin((MCVersionMinType)Kind, Major, Minor, Update);

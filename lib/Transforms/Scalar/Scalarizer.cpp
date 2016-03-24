@@ -253,10 +253,10 @@ bool Scalarizer::doInitialization(Module &M) {
 }
 
 bool Scalarizer::runOnFunction(Function &F) {
-  assert(Gathered.empty() && Scattered.empty());
-  for (BasicBlock &BB : F) {
-    for (BasicBlock::iterator II = BB.begin(), IE = BB.end(); II != IE;) {
-      Instruction *I = &*II;
+  for (Function::iterator BBI = F.begin(), BBE = F.end(); BBI != BBE; ++BBI) {
+    BasicBlock *BB = BBI;
+    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE;) {
+      Instruction *I = II;
       bool Done = visit(I);
       ++II;
       if (Done && I->getType()->isVoidTy())
@@ -285,7 +285,7 @@ Scatterer Scalarizer::scatter(Instruction *Point, Value *V) {
   }
   // In the fallback case, just put the scattered before Point and
   // keep the result local to Point.
-  return Scatterer(Point->getParent(), Point->getIterator(), V);
+  return Scatterer(Point->getParent(), Point, V);
 }
 
 // Replace Op with the gathered form of the components in CV.  Defer the
@@ -377,7 +377,7 @@ bool Scalarizer::splitBinary(Instruction &I, const Splitter &Split) {
     return false;
 
   unsigned NumElems = VT->getNumElements();
-  IRBuilder<> Builder(&I);
+  IRBuilder<> Builder(I.getParent(), &I);
   Scatterer Op0 = scatter(&I, I.getOperand(0));
   Scatterer Op1 = scatter(&I, I.getOperand(1));
   assert(Op0.size() == NumElems && "Mismatched binary operation");
@@ -397,7 +397,7 @@ bool Scalarizer::visitSelectInst(SelectInst &SI) {
     return false;
 
   unsigned NumElems = VT->getNumElements();
-  IRBuilder<> Builder(&SI);
+  IRBuilder<> Builder(SI.getParent(), &SI);
   Scatterer Op1 = scatter(&SI, SI.getOperand(1));
   Scatterer Op2 = scatter(&SI, SI.getOperand(2));
   assert(Op1.size() == NumElems && "Mismatched select");
@@ -438,7 +438,7 @@ bool Scalarizer::visitGetElementPtrInst(GetElementPtrInst &GEPI) {
   if (!VT)
     return false;
 
-  IRBuilder<> Builder(&GEPI);
+  IRBuilder<> Builder(GEPI.getParent(), &GEPI);
   unsigned NumElems = VT->getNumElements();
   unsigned NumIndices = GEPI.getNumIndices();
 
@@ -472,7 +472,7 @@ bool Scalarizer::visitCastInst(CastInst &CI) {
     return false;
 
   unsigned NumElems = VT->getNumElements();
-  IRBuilder<> Builder(&CI);
+  IRBuilder<> Builder(CI.getParent(), &CI);
   Scatterer Op0 = scatter(&CI, CI.getOperand(0));
   assert(Op0.size() == NumElems && "Mismatched cast");
   ValueVector Res;
@@ -492,7 +492,7 @@ bool Scalarizer::visitBitCastInst(BitCastInst &BCI) {
 
   unsigned DstNumElems = DstVT->getNumElements();
   unsigned SrcNumElems = SrcVT->getNumElements();
-  IRBuilder<> Builder(&BCI);
+  IRBuilder<> Builder(BCI.getParent(), &BCI);
   Scatterer Op0 = scatter(&BCI, BCI.getOperand(0));
   ValueVector Res;
   Res.resize(DstNumElems);
@@ -569,7 +569,7 @@ bool Scalarizer::visitPHINode(PHINode &PHI) {
     return false;
 
   unsigned NumElems = VT->getNumElements();
-  IRBuilder<> Builder(&PHI);
+  IRBuilder<> Builder(PHI.getParent(), &PHI);
   ValueVector Res;
   Res.resize(NumElems);
 
@@ -600,7 +600,7 @@ bool Scalarizer::visitLoadInst(LoadInst &LI) {
     return false;
 
   unsigned NumElems = Layout.VecTy->getNumElements();
-  IRBuilder<> Builder(&LI);
+  IRBuilder<> Builder(LI.getParent(), &LI);
   Scatterer Ptr = scatter(&LI, LI.getPointerOperand());
   ValueVector Res;
   Res.resize(NumElems);
@@ -625,7 +625,7 @@ bool Scalarizer::visitStoreInst(StoreInst &SI) {
     return false;
 
   unsigned NumElems = Layout.VecTy->getNumElements();
-  IRBuilder<> Builder(&SI);
+  IRBuilder<> Builder(SI.getParent(), &SI);
   Scatterer Ptr = scatter(&SI, SI.getPointerOperand());
   Scatterer Val = scatter(&SI, FullValue);
 
@@ -642,9 +642,7 @@ bool Scalarizer::visitStoreInst(StoreInst &SI) {
 // Delete the instructions that we scalarized.  If a full vector result
 // is still needed, recreate it using InsertElements.
 bool Scalarizer::finish() {
-  // The presence of data in Gathered or Scattered indicates changes
-  // made to the Function.
-  if (Gathered.empty() && Scattered.empty())
+  if (Gathered.empty())
     return false;
   for (GatherList::iterator GMI = Gathered.begin(), GME = Gathered.end();
        GMI != GME; ++GMI) {
@@ -657,7 +655,7 @@ bool Scalarizer::finish() {
       Value *Res = UndefValue::get(Ty);
       BasicBlock *BB = Op->getParent();
       unsigned Count = Ty->getVectorNumElements();
-      IRBuilder<> Builder(Op);
+      IRBuilder<> Builder(BB, Op);
       if (isa<PHINode>(Op))
         Builder.SetInsertPoint(BB, BB->getFirstInsertionPt());
       for (unsigned I = 0; I < Count; ++I)

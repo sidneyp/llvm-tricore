@@ -673,14 +673,6 @@ Init *UnOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
         PrintFatalError(CurRec->getLoc(),
                         "Undefined reference:'" + Name + "'\n");
       }
-
-      if (isa<IntRecTy>(getType())) {
-        if (BitsInit *BI = dyn_cast<BitsInit>(LHS)) {
-          if (Init *NewInit = BI->convertInitializerTo(IntRecTy::get()))
-            return NewInit;
-          break;
-        }
-      }
     }
     break;
   }
@@ -722,7 +714,7 @@ Init *UnOpInit::resolveReferences(Record &R, const RecordVal *RV) const {
 
 std::string UnOpInit::getAsString() const {
   std::string Result;
-  switch (getOpcode()) {
+  switch (Opc) {
   case CAST: Result = "!cast<" + getType()->getAsString() + ">"; break;
   case HEAD: Result = "!head"; break;
   case TAIL: Result = "!tail"; break;
@@ -850,7 +842,7 @@ Init *BinOpInit::resolveReferences(Record &R, const RecordVal *RV) const {
 
 std::string BinOpInit::getAsString() const {
   std::string Result;
-  switch (getOpcode()) {
+  switch (Opc) {
   case CONCAT: Result = "!con"; break;
   case ADD: Result = "!add"; break;
   case AND: Result = "!and"; break;
@@ -1054,7 +1046,7 @@ Init *TernOpInit::resolveReferences(Record &R,
                                     const RecordVal *RV) const {
   Init *lhs = LHS->resolveReferences(R, RV);
 
-  if (getOpcode() == IF && lhs != LHS) {
+  if (Opc == IF && lhs != LHS) {
     IntInit *Value = dyn_cast<IntInit>(lhs);
     if (Init *I = lhs->convertInitializerTo(IntRecTy::get()))
       Value = dyn_cast<IntInit>(I);
@@ -1082,7 +1074,7 @@ Init *TernOpInit::resolveReferences(Record &R,
 
 std::string TernOpInit::getAsString() const {
   std::string Result;
-  switch (getOpcode()) {
+  switch (Opc) {
   case SUBST: Result = "!subst"; break;
   case FOREACH: Result = "!foreach"; break;
   case IF: Result = "!if"; break;
@@ -1641,7 +1633,7 @@ void Record::dump() const { errs() << *this; }
 raw_ostream &llvm::operator<<(raw_ostream &OS, const Record &R) {
   OS << R.getNameInitAsString();
 
-  ArrayRef<Init *> TArgs = R.getTemplateArgs();
+  const std::vector<Init *> &TArgs = R.getTemplateArgs();
   if (!TArgs.empty()) {
     OS << "<";
     bool NeedComma = false;

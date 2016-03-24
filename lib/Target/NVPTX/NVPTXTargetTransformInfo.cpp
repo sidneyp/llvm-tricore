@@ -89,12 +89,12 @@ bool NVPTXTTIImpl::isSourceOfDivergence(const Value *V) {
   return false;
 }
 
-int NVPTXTTIImpl::getArithmeticInstrCost(
+unsigned NVPTXTTIImpl::getArithmeticInstrCost(
     unsigned Opcode, Type *Ty, TTI::OperandValueKind Opd1Info,
     TTI::OperandValueKind Opd2Info, TTI::OperandValueProperties Opd1PropInfo,
     TTI::OperandValueProperties Opd2PropInfo) {
   // Legalize the type.
-  std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
+  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
 
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
 

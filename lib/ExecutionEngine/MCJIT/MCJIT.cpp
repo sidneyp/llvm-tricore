@@ -65,13 +65,12 @@ MCJIT::createJIT(std::unique_ptr<Module> M,
                    std::move(Resolver));
 }
 
-MCJIT::MCJIT(std::unique_ptr<Module> M, std::unique_ptr<TargetMachine> TM,
+MCJIT::MCJIT(std::unique_ptr<Module> M, std::unique_ptr<TargetMachine> tm,
              std::shared_ptr<MCJITMemoryManager> MemMgr,
              std::shared_ptr<RuntimeDyld::SymbolResolver> Resolver)
-    : ExecutionEngine(TM->createDataLayout(), std::move(M)), TM(std::move(TM)),
-      Ctx(nullptr), MemMgr(std::move(MemMgr)),
-      Resolver(*this, std::move(Resolver)), Dyld(*this->MemMgr, this->Resolver),
-      ObjCache(nullptr) {
+    : ExecutionEngine(std::move(M)), TM(std::move(tm)), Ctx(nullptr),
+      MemMgr(std::move(MemMgr)), Resolver(*this, std::move(Resolver)),
+      Dyld(*this->MemMgr, this->Resolver), ObjCache(nullptr) {
   // FIXME: We are managing our modules, so we do not want the base class
   // ExecutionEngine to manage them as well. To avoid double destruction
   // of the first (and only) module added in ExecutionEngine constructor
@@ -86,6 +85,7 @@ MCJIT::MCJIT(std::unique_ptr<Module> M, std::unique_ptr<TargetMachine> TM,
   Modules.clear();
 
   OwnedModules.addModule(std::move(First));
+  setDataLayout(TM->getDataLayout());
   RegisterJITEventListener(JITEventListener::createGDBRegistrationListener());
 }
 
@@ -159,6 +159,7 @@ std::unique_ptr<MemoryBuffer> MCJIT::emitObject(Module *M) {
   // Initialize passes.
   PM.run(*M);
   // Flush the output buffer to get the generated code into memory
+  ObjStream.flush();
 
   std::unique_ptr<MemoryBuffer> CompiledObjBuffer(
                                 new ObjectMemoryBuffer(std::move(ObjBufferSV)));
@@ -192,11 +193,7 @@ void MCJIT::generateCodeForModule(Module *M) {
   if (ObjCache)
     ObjectToLoad = ObjCache->getObject(M);
 
-  if (M->getDataLayout().isDefault()) {
-    M->setDataLayout(getDataLayout());
-  } else {
-    assert(M->getDataLayout() == getDataLayout() && "DataLayout Mismatch");
-  }
+  M->setDataLayout(*TM->getDataLayout());
 
   // If the cache did not contain a suitable object, compile the object
   if (!ObjectToLoad) {
@@ -268,7 +265,7 @@ void MCJIT::finalizeModule(Module *M) {
 
 RuntimeDyld::SymbolInfo MCJIT::findExistingSymbol(const std::string &Name) {
   SmallString<128> FullName;
-  Mangler::getNameWithPrefix(FullName, Name, getDataLayout());
+  Mangler::getNameWithPrefix(FullName, Name, *TM->getDataLayout());
 
   if (void *Addr = getPointerToGlobalIfAvailable(FullName))
     return RuntimeDyld::SymbolInfo(static_cast<uint64_t>(
@@ -318,12 +315,10 @@ RuntimeDyld::SymbolInfo MCJIT::findSymbol(const std::string &Name,
     object::Archive *A = OB.getBinary();
     // Look for our symbols in each Archive
     object::Archive::child_iterator ChildIt = A->findSym(Name);
-    if (std::error_code EC = ChildIt->getError())
-      report_fatal_error(EC.message());
     if (ChildIt != A->child_end()) {
       // FIXME: Support nested archives?
       ErrorOr<std::unique_ptr<object::Binary>> ChildBinOrErr =
-          (*ChildIt)->getAsBinary();
+          ChildIt->getAsBinary();
       if (ChildBinOrErr.getError())
         continue;
       std::unique_ptr<object::Binary> &ChildBin = ChildBinOrErr.get();

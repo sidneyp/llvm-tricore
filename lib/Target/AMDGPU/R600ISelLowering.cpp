@@ -190,10 +190,6 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM,
   setSchedulingPreference(Sched::Source);
 }
 
-static inline bool isEOP(MachineBasicBlock::iterator I) {
-  return std::next(I)->getOpcode() == AMDGPU::RETURN;
-}
-
 MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
     MachineInstr * MI, MachineBasicBlock * BB) const {
   MachineFunction * MF = BB->getParent();
@@ -280,18 +276,12 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
   case AMDGPU::RAT_WRITE_CACHELESS_32_eg:
   case AMDGPU::RAT_WRITE_CACHELESS_64_eg:
   case AMDGPU::RAT_WRITE_CACHELESS_128_eg: {
+    unsigned EOP = (std::next(I)->getOpcode() == AMDGPU::RETURN) ? 1 : 0;
+
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(MI->getOpcode()))
             .addOperand(MI->getOperand(0))
             .addOperand(MI->getOperand(1))
-            .addImm(isEOP(I)); // Set End of program bit
-    break;
-  }
-  case AMDGPU::RAT_STORE_TYPED_eg: {
-    BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(MI->getOpcode()))
-            .addOperand(MI->getOperand(0))
-            .addOperand(MI->getOperand(1))
-            .addOperand(MI->getOperand(2))
-            .addImm(isEOP(I)); // Set End of program bit
+            .addImm(EOP); // Set End of program bit
     break;
   }
 
@@ -549,7 +539,7 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
         }
       }
     }
-    bool EOP = isEOP(I);
+    bool EOP = (std::next(I)->getOpcode() == AMDGPU::RETURN) ? 1 : 0;
     if (!EOP && !isLastInstructionOfItsType)
       return BB;
     unsigned CfInst = (MI->getOpcode() == AMDGPU::EG_ExportSwz)? 84 : 40;
@@ -956,8 +946,6 @@ SDValue R600TargetLowering::LowerTrig(SDValue Op, SelectionDAG &DAG) const {
   EVT VT = Op.getValueType();
   SDValue Arg = Op.getOperand(0);
   SDLoc DL(Op);
-
-  // TODO: Should this propagate fast-math-flags?
   SDValue FractPart = DAG.getNode(AMDGPUISD::FRACT, DL, VT,
       DAG.getNode(ISD::FADD, DL, VT,
         DAG.getNode(ISD::FMUL, DL, VT, Arg,
@@ -1948,7 +1936,6 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
             Arg->getOperand(0).getOperand(Element));
       }
     }
-    break;
   }
 
   case ISD::SELECT_CC: {

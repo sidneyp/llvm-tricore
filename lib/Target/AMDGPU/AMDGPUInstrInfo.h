@@ -103,6 +103,8 @@ public:
   /// read or write or -1 if indirect addressing is not used by this program.
   int getIndirectIndexEnd(const MachineFunction &MF) const;
 
+  bool canFoldMemoryOperand(const MachineInstr *MI,
+                            ArrayRef<unsigned> Ops) const override;
   bool unfoldMemoryOperand(MachineFunction &MF, MachineInstr *MI,
                         unsigned Reg, bool UnfoldLoad, bool UnfoldStore,
                         SmallVectorImpl<MachineInstr *> &NewMIs) const override;
@@ -144,9 +146,6 @@ public:
   const MCInstrDesc &getMCOpcodeFromPseudo(unsigned Opcode) const {
     return get(pseudoToMCOpcode(Opcode));
   }
-
-  ArrayRef<std::pair<int, const char *>>
-  getSerializableTargetIndices() const override;
 
 //===---------------------------------------------------------------------===//
 // Pure virtual funtions to be implemented by sub-classes.
@@ -196,7 +195,6 @@ public:
 };
 
 namespace AMDGPU {
-  LLVM_READONLY
   int16_t getNamedOperandIdx(uint16_t Opcode, uint16_t NamedIndex);
 }  // End namespace AMDGPU
 

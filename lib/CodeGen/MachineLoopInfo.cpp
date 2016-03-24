@@ -37,7 +37,7 @@ char &llvm::MachineLoopInfoID = MachineLoopInfo::ID;
 
 bool MachineLoopInfo::runOnMachineFunction(MachineFunction &) {
   releaseMemory();
-  LI.analyze(getAnalysis<MachineDominatorTree>().getBase());
+  LI.Analyze(getAnalysis<MachineDominatorTree>().getBase());
   return false;
 }
 
@@ -51,11 +51,11 @@ MachineBasicBlock *MachineLoop::getTopBlock() {
   MachineBasicBlock *TopMBB = getHeader();
   MachineFunction::iterator Begin = TopMBB->getParent()->begin();
   if (TopMBB != Begin) {
-    MachineBasicBlock *PriorMBB = &*std::prev(TopMBB->getIterator());
+    MachineBasicBlock *PriorMBB = std::prev(MachineFunction::iterator(TopMBB));
     while (contains(PriorMBB)) {
       TopMBB = PriorMBB;
       if (TopMBB == Begin) break;
-      PriorMBB = &*std::prev(TopMBB->getIterator());
+      PriorMBB = std::prev(MachineFunction::iterator(TopMBB));
     }
   }
   return TopMBB;
@@ -65,12 +65,11 @@ MachineBasicBlock *MachineLoop::getBottomBlock() {
   MachineBasicBlock *BotMBB = getHeader();
   MachineFunction::iterator End = BotMBB->getParent()->end();
   if (BotMBB != std::prev(End)) {
-    MachineBasicBlock *NextMBB = &*std::next(BotMBB->getIterator());
+    MachineBasicBlock *NextMBB = std::next(MachineFunction::iterator(BotMBB));
     while (contains(NextMBB)) {
       BotMBB = NextMBB;
-      if (BotMBB == &*std::next(BotMBB->getIterator()))
-        break;
-      NextMBB = &*std::next(BotMBB->getIterator());
+      if (BotMBB == std::next(MachineFunction::iterator(BotMBB))) break;
+      NextMBB = std::next(MachineFunction::iterator(BotMBB));
     }
   }
   return BotMBB;

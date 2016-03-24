@@ -119,9 +119,9 @@ bool ObjCARCContract::optimizeRetainCall(Function &F, Instruction *Retain) {
     return false;
 
   // Check that the call is next to the retain.
-  BasicBlock::const_iterator I = ++Call->getIterator();
-  while (IsNoopInstruction(&*I))
-    ++I;
+  BasicBlock::const_iterator I = Call;
+  ++I;
+  while (IsNoopInstruction(I)) ++I;
   if (&*I != Retain)
     return false;
 
@@ -247,7 +247,7 @@ static StoreInst *findSafeStoreForStoreStrongContraction(LoadInst *Load,
 
     // Ok, now we know we have not seen a store yet. See if Inst can write to
     // our load location, if it can not, just ignore the instruction.
-    if (!(AA->getModRefInfo(Inst, Loc) & MRI_Mod))
+    if (!(AA->getModRefInfo(Inst, Loc) & AliasAnalysis::Mod))
       continue;
 
     Store = dyn_cast<StoreInst>(Inst);
@@ -282,9 +282,9 @@ findRetainForStoreStrongContraction(Value *New, StoreInst *Store,
                                     Instruction *Release,
                                     ProvenanceAnalysis &PA) {
   // Walk up from the Store to find the retain.
-  BasicBlock::iterator I = Store->getIterator();
+  BasicBlock::iterator I = Store;
   BasicBlock::iterator Begin = Store->getParent()->begin();
-  while (I != Begin && GetBasicARCInstKind(&*I) != ARCInstKind::Retain) {
+  while (I != Begin && GetBasicARCInstKind(I) != ARCInstKind::Retain) {
     Instruction *Inst = &*I;
 
     // It is only safe to move the retain to the store if we can prove
@@ -294,7 +294,7 @@ findRetainForStoreStrongContraction(Value *New, StoreInst *Store,
       return nullptr;
     --I;
   }
-  Instruction *Retain = &*I;
+  Instruction *Retain = I;
   if (GetBasicARCInstKind(Retain) != ARCInstKind::Retain)
     return nullptr;
   if (GetArgRCIdentityRoot(Retain) != New)
@@ -429,7 +429,7 @@ bool ObjCARCContract::tryToPeepholeInstruction(
       // insert it now.
       if (!RetainRVMarker)
         return false;
-      BasicBlock::iterator BBI = Inst->getIterator();
+      BasicBlock::iterator BBI = Inst;
       BasicBlock *InstParent = Inst->getParent();
 
       // Step up to see if the call immediately precedes the RetainRV call.
@@ -440,11 +440,11 @@ bool ObjCARCContract::tryToPeepholeInstruction(
           BasicBlock *Pred = InstParent->getSinglePredecessor();
           if (!Pred)
             goto decline_rv_optimization;
-          BBI = Pred->getTerminator()->getIterator();
+          BBI = Pred->getTerminator();
           break;
         }
         --BBI;
-      } while (IsNoopInstruction(&*BBI));
+      } while (IsNoopInstruction(BBI));
 
       if (&*BBI == GetArgRCIdentityRoot(Inst)) {
         DEBUG(dbgs() << "Adding inline asm marker for "
@@ -511,10 +511,10 @@ bool ObjCARCContract::runOnFunction(Function &F) {
     return false;
 
   Changed = false;
-  AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
+  AA = &getAnalysis<AliasAnalysis>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
-  PA.setAA(&getAnalysis<AAResultsWrapperPass>().getAAResults());
+  PA.setAA(&getAnalysis<AliasAnalysis>());
 
   DEBUG(llvm::dbgs() << "**** ObjCARC Contract ****\n");
 
@@ -629,13 +629,13 @@ bool ObjCARCContract::runOnFunction(Function &F) {
 char ObjCARCContract::ID = 0;
 INITIALIZE_PASS_BEGIN(ObjCARCContract, "objc-arc-contract",
                       "ObjC ARC contraction", false, false)
-INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_END(ObjCARCContract, "objc-arc-contract",
                     "ObjC ARC contraction", false, false)
 
 void ObjCARCContract::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<AAResultsWrapperPass>();
+  AU.addRequired<AliasAnalysis>();
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.setPreservesCFG();
 }

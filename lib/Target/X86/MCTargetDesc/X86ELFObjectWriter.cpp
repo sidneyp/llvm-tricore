@@ -32,11 +32,9 @@ namespace {
 
 X86ELFObjectWriter::X86ELFObjectWriter(bool IsELF64, uint8_t OSABI,
                                        uint16_t EMachine)
-    : MCELFObjectTargetWriter(IsELF64, OSABI, EMachine,
-                              // Only i386 and IAMCU use Rel instead of RelA.
-                              /*HasRelocationAddend*/
-                              (EMachine != ELF::EM_386) &&
-                                  (EMachine != ELF::EM_IAMCU)) {}
+  : MCELFObjectTargetWriter(IsELF64, OSABI, EMachine,
+                            // Only i386 uses Rel instead of RelA.
+                            /*HasRelocationAddend*/ EMachine != ELF::EM_386) {}
 
 X86ELFObjectWriter::~X86ELFObjectWriter()
 {}
@@ -248,8 +246,7 @@ unsigned X86ELFObjectWriter::GetRelocType(const MCValue &Target,
   if (getEMachine() == ELF::EM_X86_64)
     return getRelocType64(Modifier, Type, IsPCRel);
 
-  assert((getEMachine() == ELF::EM_386 || getEMachine() == ELF::EM_IAMCU) &&
-         "Unsupported ELF machine type.");
+  assert(getEMachine() == ELF::EM_386 && "Unsupported ELF machine type.");
   return getRelocType32(Modifier, getType32(Type), IsPCRel);
 }
 

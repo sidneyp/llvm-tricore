@@ -42,10 +42,6 @@ static cl::
 opt<bool> DisableVSXSwapRemoval("disable-ppc-vsx-swap-removal", cl::Hidden,
                                 cl::desc("Disable VSX Swap Removal for PPC"));
 
-static cl::
-opt<bool> DisableMIPeephole("disable-ppc-peephole", cl::Hidden,
-                            cl::desc("Disable machine peepholes for PPC"));
-
 static cl::opt<bool>
 EnableGEPOpt("ppc-gep-opt", cl::Hidden,
              cl::desc("Enable optimizations on complex GEPs"),
@@ -61,19 +57,11 @@ EnableExtraTOCRegDeps("enable-ppc-extra-toc-reg-deps",
                       cl::desc("Add extra TOC register dependencies"),
                       cl::init(true), cl::Hidden);
 
-static cl::opt<bool>
-EnableMachineCombinerPass("ppc-machine-combiner",
-                          cl::desc("Enable the machine combiner pass"),
-                          cl::init(true), cl::Hidden);
-
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
   RegisterTargetMachine<PPC32TargetMachine> A(ThePPC32Target);
   RegisterTargetMachine<PPC64TargetMachine> B(ThePPC64Target);
   RegisterTargetMachine<PPC64TargetMachine> C(ThePPC64LETarget);
-
-  PassRegistry &PR = *PassRegistry::getPassRegistry();
-  initializePPCBoolRetToIntPass(PR);
 }
 
 /// Return the datalayout string of a subtarget.
@@ -130,7 +118,7 @@ static std::string computeFSAdditions(StringRef FS, CodeGenOpt::Level OL,
   }
 
   if (OL != CodeGenOpt::None) {
-    if (!FullFS.empty())
+     if (!FullFS.empty())
       FullFS = "+invariant-function-descriptors," + FullFS;
     else
       FullFS = "+invariant-function-descriptors";
@@ -156,7 +144,7 @@ static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
     return PPCTargetMachine::PPC_ABI_ELFv2;
 
   assert(Options.MCOptions.getABIName().empty() &&
-         "Unknown target-abi option!");
+	 "Unknown target-abi option!");
 
   if (!TT.isMacOSX()) {
     switch (TT.getArch()) {
@@ -172,9 +160,9 @@ static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
   return PPCTargetMachine::PPC_ABI_UNKNOWN;
 }
 
-// The FeatureString here is a little subtle. We are modifying the feature
-// string with what are (currently) non-function specific overrides as it goes
-// into the LLVMTargetMachine constructor and then using the stored value in the
+// The FeatureString here is a little subtle. We are modifying the feature string
+// with what are (currently) non-function specific overrides as it goes into the
+// LLVMTargetMachine constructor and then using the stored value in the
 // Subtarget constructor below it.
 PPCTargetMachine::PPCTargetMachine(const Target &T, const Triple &TT,
                                    StringRef CPU, StringRef FS,
@@ -239,19 +227,6 @@ PPCTargetMachine::getSubtargetImpl(const Function &F) const {
                        ? FSAttr.getValueAsString().str()
                        : TargetFS;
 
-  // FIXME: This is related to the code below to reset the target options,
-  // we need to know whether or not the soft float flag is set on the
-  // function before we can generate a subtarget. We also need to use
-  // it as a key for the subtarget since that can be the only difference
-  // between two functions.
-  bool SoftFloat =
-    F.hasFnAttribute("use-soft-float") &&
-    F.getFnAttribute("use-soft-float").getValueAsString() == "true";
-  // If the soft float attribute is set on the function turn on the soft float
-  // subtarget feature.
-  if (SoftFloat)
-    FS += FS.empty() ? "+soft-float" : ",+soft-float";
-
   auto &I = SubtargetMap[CPU + FS];
   if (!I) {
     // This needs to be done before we create a new subtarget since any
@@ -302,8 +277,6 @@ TargetPassConfig *PPCTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void PPCPassConfig::addIRPasses() {
-  if (TM->getOptLevel() != CodeGenOpt::None)
-    addPass(createPPCBoolRetToIntPass());
   addPass(createAtomicExpandPass(&getPPCTargetMachine()));
 
   // For the BG/Q (or if explicitly requested), add explicit data prefetch
@@ -343,10 +316,6 @@ bool PPCPassConfig::addPreISel() {
 
 bool PPCPassConfig::addILPOpts() {
   addPass(&EarlyIfConverterID);
-
-  if (EnableMachineCombinerPass)
-    addPass(&MachineCombinerID);
-
   return true;
 }
 
@@ -370,12 +339,6 @@ void PPCPassConfig::addMachineSSAOptimization() {
   if (TM->getTargetTriple().getArch() == Triple::ppc64le &&
       !DisableVSXSwapRemoval)
     addPass(createPPCVSXSwapRemovalPass());
-  // Target-specific peephole cleanups performed after instruction
-  // selection.
-  if (!DisableMIPeephole) {
-    addPass(createPPCMIPeepholePass());
-    addPass(&DeadMachineInstructionElimID);
-  }
 }
 
 void PPCPassConfig::addPreRegAlloc() {
@@ -401,7 +364,6 @@ void PPCPassConfig::addPreEmitPass() {
 }
 
 TargetIRAnalysis PPCTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(PPCTTIImpl(this, F));
-  });
+  return TargetIRAnalysis(
+      [this](Function &F) { return TargetTransformInfo(PPCTTIImpl(this, F)); });
 }

@@ -106,7 +106,7 @@ void BoundsChecking::emitBranchToTrap(Value *Cmp) {
   }
   ++ChecksAdded;
 
-  BasicBlock::iterator Inst = Builder->GetInsertPoint();
+  Instruction *Inst = Builder->GetInsertPoint();
   BasicBlock *OldBB = Inst->getParent();
   BasicBlock *Cont = OldBB->splitBasicBlock(Inst);
   OldBB->getTerminator()->eraseFromParent();

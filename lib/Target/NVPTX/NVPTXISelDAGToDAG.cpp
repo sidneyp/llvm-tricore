@@ -12,8 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "NVPTXISelDAGToDAG.h"
-#include "NVPTXUtilities.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
@@ -532,7 +530,7 @@ static unsigned int getCodeAddrSpace(MemSDNode *N) {
   if (!Src)
     return NVPTX::PTXLdStInstCode::GENERIC;
 
-  if (auto *PT = dyn_cast<PointerType>(Src->getType())) {
+  if (const PointerType *PT = dyn_cast<PointerType>(Src->getType())) {
     switch (PT->getAddressSpace()) {
     case llvm::ADDRESS_SPACE_LOCAL: return NVPTX::PTXLdStInstCode::LOCAL;
     case llvm::ADDRESS_SPACE_GLOBAL: return NVPTX::PTXLdStInstCode::GLOBAL;
@@ -544,39 +542,6 @@ static unsigned int getCodeAddrSpace(MemSDNode *N) {
     }
   }
   return NVPTX::PTXLdStInstCode::GENERIC;
-}
-
-static bool canLowerToLDG(MemSDNode *N, const NVPTXSubtarget &Subtarget,
-                          unsigned CodeAddrSpace, MachineFunction *F) {
-  // To use non-coherent caching, the load has to be from global
-  // memory and we have to prove that the memory area is not written
-  // to anywhere for the duration of the kernel call, not even after
-  // the load.
-  //
-  // To ensure that there are no writes to the memory, we require the
-  // underlying pointer to be a noalias (__restrict) kernel parameter
-  // that is never used for a write. We can only do this for kernel
-  // functions since from within a device function, we cannot know if
-  // there were or will be writes to the memory from the caller - or we
-  // could, but then we would have to do inter-procedural analysis.
-  if (!Subtarget.hasLDG() || CodeAddrSpace != NVPTX::PTXLdStInstCode::GLOBAL ||
-      !isKernelFunction(*F->getFunction())) {
-    return false;
-  }
-
-  // We use GetUnderlyingObjects() here instead of
-  // GetUnderlyingObject() mainly because the former looks through phi
-  // nodes while the latter does not. We need to look through phi
-  // nodes to handle pointer induction variables.
-  SmallVector<Value *, 8> Objs;
-  GetUnderlyingObjects(const_cast<Value *>(N->getMemOperand()->getValue()),
-                       Objs, F->getDataLayout());
-  for (Value *Obj : Objs) {
-    auto *A = dyn_cast<const Argument>(Obj);
-    if (!A || !A->onlyReadsMemory() || !A->hasNoAliasAttr()) return false;
-  }
-
-  return true;
 }
 
 SDNode *NVPTXDAGToDAGISel::SelectIntrinsicNoChain(SDNode *N) {
@@ -672,10 +637,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLoad(SDNode *N) {
 
   // Address Space Setting
   unsigned int codeAddrSpace = getCodeAddrSpace(LD);
-
-  if (canLowerToLDG(LD, *Subtarget, codeAddrSpace, MF)) {
-    return SelectLDGLDU(N);
-  }
 
   // Volatile Setting
   // - .volatile is only availalble for .global and .shared
@@ -910,10 +871,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLoadVector(SDNode *N) {
 
   // Address Space Setting
   unsigned int CodeAddrSpace = getCodeAddrSpace(MemSD);
-
-  if (canLowerToLDG(MemSD, *Subtarget, CodeAddrSpace, MF)) {
-    return SelectLDGLDU(N);
-  }
 
   // Volatile Setting
   // - .volatile is only availalble for .global and .shared
@@ -1468,7 +1425,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
       switch (N->getOpcode()) {
       default:
         return nullptr;
-      case ISD::LOAD:
       case ISD::INTRINSIC_W_CHAIN:
         if (IsLDG) {
           switch (EltVT.getSimpleVT().SimpleTy) {
@@ -1518,7 +1474,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           }
         }
         break;
-      case NVPTXISD::LoadV2:
       case NVPTXISD::LDGV2:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1567,7 +1522,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           break;
         }
         break;
-      case NVPTXISD::LoadV4:
       case NVPTXISD::LDGV4:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1609,7 +1563,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
       switch (N->getOpcode()) {
       default:
         return nullptr;
-      case ISD::LOAD:
       case ISD::INTRINSIC_W_CHAIN:
         if (IsLDG) {
           switch (EltVT.getSimpleVT().SimpleTy) {
@@ -1659,7 +1612,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           }
         }
         break;
-      case NVPTXISD::LoadV2:
       case NVPTXISD::LDGV2:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1708,7 +1660,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           break;
         }
         break;
-      case NVPTXISD::LoadV4:
       case NVPTXISD::LDGV4:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1756,7 +1707,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
       switch (N->getOpcode()) {
       default:
         return nullptr;
-      case ISD::LOAD:
       case ISD::INTRINSIC_W_CHAIN:
         if (IsLDG) {
           switch (EltVT.getSimpleVT().SimpleTy) {
@@ -1806,7 +1756,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           }
         }
         break;
-      case NVPTXISD::LoadV2:
       case NVPTXISD::LDGV2:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1855,7 +1804,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           break;
         }
         break;
-      case NVPTXISD::LoadV4:
       case NVPTXISD::LDGV4:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1897,7 +1845,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
       switch (N->getOpcode()) {
       default:
         return nullptr;
-      case ISD::LOAD:
       case ISD::INTRINSIC_W_CHAIN:
         if (IsLDG) {
           switch (EltVT.getSimpleVT().SimpleTy) {
@@ -1947,7 +1894,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           }
         }
         break;
-      case NVPTXISD::LoadV2:
       case NVPTXISD::LDGV2:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -1996,7 +1942,6 @@ SDNode *NVPTXDAGToDAGISel::SelectLDGLDU(SDNode *N) {
           break;
         }
         break;
-      case NVPTXISD::LoadV4:
       case NVPTXISD::LDGV4:
         switch (EltVT.getSimpleVT().SimpleTy) {
         default:
@@ -5094,7 +5039,7 @@ bool NVPTXDAGToDAGISel::ChkMemSDNodeAddressSpace(SDNode *N,
   }
   if (!Src)
     return false;
-  if (auto *PT = dyn_cast<PointerType>(Src->getType()))
+  if (const PointerType *PT = dyn_cast<PointerType>(Src->getType()))
     return (PT->getAddressSpace() == spN);
   return false;
 }

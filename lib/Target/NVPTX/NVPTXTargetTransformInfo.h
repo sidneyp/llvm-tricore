@@ -52,7 +52,7 @@ public:
 
   bool isSourceOfDivergence(const Value *V);
 
-  int getArithmeticInstrCost(
+  unsigned getArithmeticInstrCost(
       unsigned Opcode, Type *Ty,
       TTI::OperandValueKind Opd1Info = TTI::OK_AnyValue,
       TTI::OperandValueKind Opd2Info = TTI::OK_AnyValue,

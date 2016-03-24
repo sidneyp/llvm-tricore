@@ -71,15 +71,9 @@ unsigned AMDGPUFrameLowering::getStackWidth(const MachineFunction &MF) const {
 }
 
 /// \returns The number of registers allocated for \p FI.
-int AMDGPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
-                                                int FI,
-                                                unsigned &FrameReg) const {
+int AMDGPUFrameLowering::getFrameIndexOffset(const MachineFunction &MF,
+                                         int FI) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
-
-  // Fill in FrameReg output argument.
-  FrameReg = RI->getFrameRegister(MF);
-
   // Start the offset at 2 so we don't overwrite work group information.
   // XXX: We should only do this when the shader actually uses this
   // information.

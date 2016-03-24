@@ -165,7 +165,7 @@ TEST_F(CloneInstruction, Attributes) {
 
   Attribute::AttrKind AK[] = { Attribute::NoCapture };
   AttributeSet AS = AttributeSet::get(context, 0, AK);
-  Argument *A = &*F1->arg_begin();
+  Argument *A = F1->arg_begin();
   A->addAttr(AS);
 
   SmallVector<ReturnInst*, 4> Returns;
@@ -193,7 +193,7 @@ TEST_F(CloneInstruction, CallingConvention) {
 
   SmallVector<ReturnInst*, 4> Returns;
   ValueToValueMapTy VMap;
-  VMap[&*F1->arg_begin()] = &*F2->arg_begin();
+  VMap[F1->arg_begin()] = F2->arg_begin();
 
   CloneFunctionInto(F2, F1, VMap, false, Returns);
   EXPECT_EQ(CallingConv::Cold, F2->getCallingConv());
@@ -231,14 +231,13 @@ protected:
     auto *File = DBuilder.createFile("filename.c", "/file/dir/");
     DITypeRefArray ParamTypes = DBuilder.getOrCreateTypeArray(None);
     DISubroutineType *FuncType =
-        DBuilder.createSubroutineType(ParamTypes);
+        DBuilder.createSubroutineType(File, ParamTypes);
     auto *CU =
         DBuilder.createCompileUnit(dwarf::DW_LANG_C99, "filename.c",
                                    "/file/dir", "CloneFunc", false, "", 0);
 
     auto *Subprogram = DBuilder.createFunction(
-        CU, "f", "f", File, 4, FuncType, true, true, 3, 0, false);
-    OldFunc->setSubprogram(Subprogram);
+        CU, "f", "f", File, 4, FuncType, true, true, 3, 0, false, OldFunc);
 
     // Function body
     BasicBlock* Entry = BasicBlock::Create(C, "", OldFunc);
@@ -256,8 +255,8 @@ protected:
     auto *IntType =
         DBuilder.createBasicType("int", 32, 0, dwarf::DW_ATE_signed);
     auto *E = DBuilder.createExpression();
-    auto *Variable =
-        DBuilder.createAutoVariable(Subprogram, "x", File, 5, IntType, true);
+    auto *Variable = DBuilder.createLocalVariable(
+        dwarf::DW_TAG_auto_variable, Subprogram, "x", File, 5, IntType, true);
     auto *DL = DILocation::get(Subprogram->getContext(), 5, 0, Subprogram);
     DBuilder.insertDeclare(Alloca, Variable, E, DL, Store);
     DBuilder.insertDbgValueIntrinsic(AllocaContent, 0, Variable, E, DL,
@@ -310,8 +309,8 @@ TEST_F(CloneFunc, Subprogram) {
   auto *Sub2 = cast<DISubprogram>(*Iter);
 
   EXPECT_TRUE(
-      (Sub1 == OldFunc->getSubprogram() && Sub2 == NewFunc->getSubprogram()) ||
-      (Sub1 == NewFunc->getSubprogram() && Sub2 == OldFunc->getSubprogram()));
+      (Sub1->getFunction() == OldFunc && Sub2->getFunction() == NewFunc) ||
+      (Sub1->getFunction() == NewFunc && Sub2->getFunction() == OldFunc));
 }
 
 // Test that the new subprogram entry was not added to the CU which doesn't
@@ -355,8 +354,8 @@ TEST_F(CloneFunc, InstructionOwnership) {
       // But that they belong to different functions
       auto *OldSubprogram = cast<DISubprogram>(OldDL.getScope());
       auto *NewSubprogram = cast<DISubprogram>(NewDL.getScope());
-      EXPECT_EQ(OldFunc->getSubprogram(), OldSubprogram);
-      EXPECT_EQ(NewFunc->getSubprogram(), NewSubprogram);
+      EXPECT_EQ(OldFunc, OldSubprogram->getFunction());
+      EXPECT_EQ(NewFunc, NewSubprogram->getFunction());
     }
 
     ++OldIter;
@@ -390,21 +389,25 @@ TEST_F(CloneFunc, DebugIntrinsics) {
                          getParent()->getParent());
 
       // Old variable must belong to the old function
-      EXPECT_EQ(OldFunc->getSubprogram(),
-                cast<DISubprogram>(OldIntrin->getVariable()->getScope()));
+      EXPECT_EQ(OldFunc,
+                cast<DISubprogram>(OldIntrin->getVariable()->getScope())
+                    ->getFunction());
       // New variable must belong to the New function
-      EXPECT_EQ(NewFunc->getSubprogram(),
-                cast<DISubprogram>(NewIntrin->getVariable()->getScope()));
+      EXPECT_EQ(NewFunc,
+                cast<DISubprogram>(NewIntrin->getVariable()->getScope())
+                    ->getFunction());
     } else if (DbgValueInst* OldIntrin = dyn_cast<DbgValueInst>(&OldI)) {
       DbgValueInst* NewIntrin = dyn_cast<DbgValueInst>(&NewI);
       EXPECT_TRUE(NewIntrin);
 
       // Old variable must belong to the old function
-      EXPECT_EQ(OldFunc->getSubprogram(),
-                cast<DISubprogram>(OldIntrin->getVariable()->getScope()));
+      EXPECT_EQ(OldFunc,
+                cast<DISubprogram>(OldIntrin->getVariable()->getScope())
+                    ->getFunction());
       // New variable must belong to the New function
-      EXPECT_EQ(NewFunc->getSubprogram(),
-                cast<DISubprogram>(NewIntrin->getVariable()->getScope()));
+      EXPECT_EQ(NewFunc,
+                cast<DISubprogram>(NewIntrin->getVariable()->getScope())
+                    ->getFunction());
     }
 
     ++OldIter;
@@ -436,7 +439,7 @@ protected:
     IBuilder.CreateRetVoid();
   }
 
-  void CreateNewModule() { NewM = llvm::CloneModule(OldM).release(); }
+  void CreateNewModule() { NewM = llvm::CloneModule(OldM); }
 
   LLVMContext C;
   Module *OldM;

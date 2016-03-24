@@ -128,23 +128,17 @@ def : ProcessorModel<"mullins",    SIQuarterSpeedModel,
 //===----------------------------------------------------------------------===//
 
 def : ProcessorModel<"tonga",   SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0,
-   FeatureLDSBankCount32]
+  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0]
 >;
 
 def : ProcessorModel<"iceland", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0,
-   FeatureLDSBankCount32]
+  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0]
 >;
 
 def : ProcessorModel<"carrizo", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureISAVersion8_0_1, FeatureLDSBankCount32]
+  [FeatureVolcanicIslands, FeatureISAVersion8_0_1]
 >;
 
 def : ProcessorModel<"fiji", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureISAVersion8_0_3, FeatureLDSBankCount32]
->;
-
-def : ProcessorModel<"stoney", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureISAVersion8_0_1, FeatureLDSBankCount16]
+  [FeatureVolcanicIslands, FeatureISAVersion8_0_1]
 >;

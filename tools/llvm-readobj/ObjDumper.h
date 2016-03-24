@@ -1,4 +1,4 @@
-//===-- ObjDumper.h ---------------------------------------------*- C++ -*-===//
+//===-- ObjDumper.h -------------------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,8 +15,7 @@
 
 namespace llvm {
 namespace object {
-class COFFImportFile;
-class ObjectFile;
+  class ObjectFile;
 }
 
 class StreamWriter;
@@ -39,9 +38,6 @@ public:
   virtual void printNeededLibraries() { }
   virtual void printProgramHeaders() { }
   virtual void printHashTable() { }
-  virtual void printGnuHashTable() { }
-  virtual void printLoadName() {}
-  virtual void printVersionInfo() {}
 
   // Only implemented for ARM ELF at this time.
   virtual void printAttributes() { }
@@ -56,15 +52,6 @@ public:
   virtual void printCOFFExports() { }
   virtual void printCOFFDirectives() { }
   virtual void printCOFFBaseReloc() { }
-  virtual void printCodeViewDebugInfo() { }
-
-  // Only implemented for MachO.
-  virtual void printMachODataInCode() { }
-  virtual void printMachOVersionMin() { }
-  virtual void printMachODysymtab() { }
-  virtual void printMachOSegment() { }
-  virtual void printMachOIndirectSymbols() { }
-  virtual void printMachOLinkerOptions() { }
 
   virtual void printStackMap() const = 0;
 
@@ -83,8 +70,6 @@ std::error_code createELFDumper(const object::ObjectFile *Obj,
 std::error_code createMachODumper(const object::ObjectFile *Obj,
                                   StreamWriter &Writer,
                                   std::unique_ptr<ObjDumper> &Result);
-
-void dumpCOFFImportFile(const object::COFFImportFile *File);
 
 } // namespace llvm
 

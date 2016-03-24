@@ -1,4 +1,4 @@
-//===-- llvm-size.cpp - Print the size of each object section ---*- C++ -*-===//
+//===-- llvm-size.cpp - Print the size of each object section -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -30,7 +30,6 @@
 #include <algorithm>
 #include <string>
 #include <system_error>
-
 using namespace llvm;
 using namespace object;
 
@@ -99,7 +98,7 @@ static size_t getNumLengthAsString(uint64_t num) {
 }
 
 /// @brief Return the printing format for the Radix.
-static const char *getRadixFmt() {
+static const char *getRadixFmt(void) {
   switch (Radix) {
   case octal:
     return PRIo64;
@@ -414,6 +413,14 @@ static bool checkMachOAndArchFlags(ObjectFile *o, StringRef file) {
 /// @brief Print the section sizes for @p file. If @p file is an archive, print
 ///        the section sizes for each archive member.
 static void PrintFileSectionSizes(StringRef file) {
+  // If file is not stdin, check that it exists.
+  if (file != "-") {
+    if (!sys::fs::exists(file)) {
+      errs() << ToolName << ": '" << file << "': "
+             << "No such file\n";
+      return;
+    }
+  }
 
   // Attempt to open the binary.
   ErrorOr<OwningBinary<Binary>> BinaryOrErr = createBinary(file);
@@ -428,13 +435,7 @@ static void PrintFileSectionSizes(StringRef file) {
     for (object::Archive::child_iterator i = a->child_begin(),
                                          e = a->child_end();
          i != e; ++i) {
-      if (i->getError()) {
-        errs() << ToolName << ": " << file << ": " << i->getError().message()
-               << ".\n";
-        exit(1);
-      }
-      auto &c = i->get();
-      ErrorOr<std::unique_ptr<Binary>> ChildOrErr = c.getAsBinary();
+      ErrorOr<std::unique_ptr<Binary>> ChildOrErr = i->getAsBinary();
       if (std::error_code EC = ChildOrErr.getError()) {
         errs() << ToolName << ": " << file << ": " << EC.message() << ".\n";
         continue;
@@ -496,13 +497,7 @@ static void PrintFileSectionSizes(StringRef file) {
               for (object::Archive::child_iterator i = UA->child_begin(),
                                                    e = UA->child_end();
                    i != e; ++i) {
-                if (std::error_code EC = i->getError()) {
-                  errs() << ToolName << ": " << file << ": " << EC.message()
-                         << ".\n";
-                  exit(1);
-                }
-                auto &c = i->get();
-                ErrorOr<std::unique_ptr<Binary>> ChildOrErr = c.getAsBinary();
+                ErrorOr<std::unique_ptr<Binary>> ChildOrErr = i->getAsBinary();
                 if (std::error_code EC = ChildOrErr.getError()) {
                   errs() << ToolName << ": " << file << ": " << EC.message()
                          << ".\n";
@@ -579,13 +574,7 @@ static void PrintFileSectionSizes(StringRef file) {
             for (object::Archive::child_iterator i = UA->child_begin(),
                                                  e = UA->child_end();
                  i != e; ++i) {
-              if (std::error_code EC = i->getError()) {
-                errs() << ToolName << ": " << file << ": " << EC.message()
-                       << ".\n";
-                exit(1);
-              }
-              auto &c = i->get();
-              ErrorOr<std::unique_ptr<Binary>> ChildOrErr = c.getAsBinary();
+              ErrorOr<std::unique_ptr<Binary>> ChildOrErr = i->getAsBinary();
               if (std::error_code EC = ChildOrErr.getError()) {
                 errs() << ToolName << ": " << file << ": " << EC.message()
                        << ".\n";
@@ -649,12 +638,7 @@ static void PrintFileSectionSizes(StringRef file) {
         for (object::Archive::child_iterator i = UA->child_begin(),
                                              e = UA->child_end();
              i != e; ++i) {
-          if (std::error_code EC = i->getError()) {
-            errs() << ToolName << ": " << file << ": " << EC.message() << ".\n";
-            exit(1);
-          }
-          auto &c = i->get();
-          ErrorOr<std::unique_ptr<Binary>> ChildOrErr = c.getAsBinary();
+          ErrorOr<std::unique_ptr<Binary>> ChildOrErr = i->getAsBinary();
           if (std::error_code EC = ChildOrErr.getError()) {
             errs() << ToolName << ": " << file << ": " << EC.message() << ".\n";
             continue;

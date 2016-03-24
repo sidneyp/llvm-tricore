@@ -179,11 +179,7 @@ void VLIWMachineScheduler::schedule() {
   initQueues(TopRoots, BotRoots);
 
   bool IsTopNode = false;
-  while (true) {
-    DEBUG(dbgs() << "** VLIWMachineScheduler::schedule picking next node\n");
-    SUnit *SU = SchedImpl->pickNode(IsTopNode);
-    if (!SU) break;
-
+  while (SUnit *SU = SchedImpl->pickNode(IsTopNode)) {
     if (!checkSchedLimit())
       break;
 
