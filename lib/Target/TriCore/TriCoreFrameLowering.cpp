@@ -40,11 +40,11 @@ TriCoreFrameLowering::TriCoreFrameLowering()
 
 bool TriCoreFrameLowering::hasFP(const MachineFunction &MF) const {
 
-	const MachineFrameInfo *MFI = MF.getFrameInfo();
+  const MachineFrameInfo *MFI = MF.getFrameInfo();
 
   return (MF.getTarget().Options.DisableFramePointerElim(MF) ||
          MF.getFrameInfo()->hasVarSizedObjects() ||
-				 MFI->isFrameAddressTaken()) ;
+         MFI->isFrameAddressTaken()) ;
 }
 
 uint64_t TriCoreFrameLowering::computeStackSize(MachineFunction &MF) const {
@@ -73,8 +73,8 @@ static unsigned materializeOffset(MachineFunction &MF, MachineBasicBlock &MBB,
   } else {
     // The stack offset does not fit in the ADD/SUB instruction.
     // Materialize the offset using MOVLO/MOVHI.
-  	// FIXME: See to this code, in case we ever get a very large stack.
-  	// 		    I guess it should create an error someday.
+    // FIXME: See to this code, in case we ever get a very large stack.
+    //        I guess it should create an error someday.
     unsigned OffsetReg = TriCore::A14;
     unsigned OffsetLo = (unsigned)(Offset & 0xffff);
     unsigned OffsetHi = (unsigned)((Offset & 0xffff0000) >> 16);
@@ -104,13 +104,13 @@ void TriCoreFrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   if (TFI->hasFP(MF)) {
-  	MachineFunction::iterator I;
-  	BuildMI(MBB, MBBI, dl, TII.get(TriCore::MOVAArr), TriCore::A14)
-	      			.addReg(TriCore::A10);
+    MachineFunction::iterator I;
+    BuildMI(MBB, MBBI, dl, TII.get(TriCore::MOVAArr), TriCore::A14)
+              .addReg(TriCore::A10);
 
-  	// Mark the FramePtr as live-in in every block except the entry
- 	   for (I = std::next(MF.begin());	I != MF.end(); ++I)
- 	  	 I->addLiveIn(TriCore::A14);
+    // Mark the FramePtr as live-in in every block except the entry
+     for (I = std::next(MF.begin());  I != MF.end(); ++I)
+       I->addLiveIn(TriCore::A14);
   }
 
   // Adjust the stack pointer.

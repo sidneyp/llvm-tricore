@@ -1239,8 +1239,7 @@ Triple Triple::getLittleEndianArchVariant() const {
   case Triple::ppc:
   case Triple::sparcv9:
   case Triple::systemz:
-  case Triple::tce:
-  case Triple::tricore:
+  case Triple::tce:  
 
   // ARM is intentionally unsupported here, changing the architecture would
   // drop any arch suffixes.
@@ -1278,6 +1277,7 @@ Triple Triple::getLittleEndianArchVariant() const {
   case Triple::x86:
   case Triple::x86_64:
   case Triple::xcore:
+  case Triple::tricore:
     // Already little endian.
     break;
 

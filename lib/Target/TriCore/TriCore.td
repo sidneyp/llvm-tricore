@@ -18,18 +18,12 @@
 include "llvm/Target/Target.td"
 
 //===----------------------------------------------------------------------===//
-// Register File Description
+// Descriptions
 //===----------------------------------------------------------------------===//
 
 include "TriCoreRegisterInfo.td"
-
-include "TriCoreCallingConv.td"
-
-//===----------------------------------------------------------------------===//
-// Instruction Descriptions
-//===----------------------------------------------------------------------===//
-
 include "TriCoreInstrInfo.td"
+include "TriCoreCallingConv.td"
 
 def TriCoreInstrInfo : InstrInfo;
 

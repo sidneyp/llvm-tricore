@@ -78,13 +78,13 @@ TriCoreTargetLowering::TriCoreTargetLowering(TriCoreTargetMachine &TriCoreTM)
 //  for (MVT VT : MVT::integer_valuetypes()) {
 //     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i8,  Expand);
 //     setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16,  Promote);
-//  		 setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i32, Expand);
+//       setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i32, Expand);
 //   }
 
   // Nodes that require custom lowering
   setOperationAction(ISD::GlobalAddress, MVT::i32,   Custom);
   setOperationAction(ISD::BR_CC,         MVT::i32,   Custom);
-  setOperationAction(ISD::BR_CC, 				 MVT::i64, 	 Custom);
+  setOperationAction(ISD::BR_CC,         MVT::i64,   Custom);
   setOperationAction(ISD::SELECT_CC,     MVT::i32,   Custom);
   setOperationAction(ISD::SETCC,         MVT::i32,   Custom);
   setOperationAction(ISD::SHL,           MVT::i32,   Custom);
@@ -98,16 +98,16 @@ TriCoreTargetLowering::TriCoreTargetLowering(TriCoreTargetMachine &TriCoreTM)
 }
 
 SDValue TriCoreTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
-	switch (Op.getOpcode()) {
-  default:								    llvm_unreachable("Unimplemented operand");
-  case ISD::GlobalAddress:    	return LowerGlobalAddress(Op, DAG);
-  case ISD::BR_CC:            	return LowerBR_CC(Op, DAG);
-  case ISD::SELECT_CC:        	return LowerSELECT_CC(Op, DAG);
-  case ISD::SETCC:            	return LowerSETCC(Op, DAG);
+  switch (Op.getOpcode()) {
+  default:                    llvm_unreachable("Unimplemented operand");
+  case ISD::GlobalAddress:      return LowerGlobalAddress(Op, DAG);
+  case ISD::BR_CC:              return LowerBR_CC(Op, DAG);
+  case ISD::SELECT_CC:          return LowerSELECT_CC(Op, DAG);
+  case ISD::SETCC:              return LowerSETCC(Op, DAG);
   case ISD::SHL:
   case ISD::SRL:
-  case ISD::SRA:              	return LowerShifts(Op, DAG);
-  //case ISD::SIGN_EXTEND:      	return LowerSIGN_EXTEND(Op, DAG);
+  case ISD::SRA:                return LowerShifts(Op, DAG);
+  //case ISD::SIGN_EXTEND:        return LowerSIGN_EXTEND(Op, DAG);
   //case ISD::SIGN_EXTEND_INREG:  return LowerSIGN_EXTEND_INREG(Op, DAG);
   }
 }
@@ -115,8 +115,8 @@ SDValue TriCoreTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) con
 SDValue TriCoreTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
                                                SelectionDAG &DAG) const {
 
-	Op.dump();
-	return SDValue();
+  Op.dump();
+  return SDValue();
 }
 
 SDValue TriCoreTargetLowering::LowerSIGN_EXTEND(SDValue Op,
@@ -155,43 +155,43 @@ bool TriCoreTargetLowering::isTruncateFree(EVT VT1, EVT VT2) const {
 
 
 SDValue TriCoreTargetLowering::LowerShifts(SDValue Op,
-		SelectionDAG &DAG) const {
-	unsigned Opc = Op.getOpcode();
-	SDNode* N = Op.getNode();
-	SDValue shiftValue =  N->getOperand(1);
+    SelectionDAG &DAG) const {
+  unsigned Opc = Op.getOpcode();
+  SDNode* N = Op.getNode();
+  SDValue shiftValue =  N->getOperand(1);
 
-	EVT VT = Op.getValueType();
-	SDLoc dl(N);
-	outs() << "Opc: " << Opc << "\n";
-	switch (Opc) {
-	default: llvm_unreachable("Invalid shift opcode!");
-	case ISD::SHL:
-		return DAG.getNode(TriCoreISD::SH, dl, VT, N->getOperand(0), N->getOperand(1));
-	case ISD::SRL:
-	case ISD::SRA:
-		if(isa<ConstantSDNode>(shiftValue)) {
-			outs() <<"shift constant\n";
-			int64_t shiftSVal = cast<ConstantSDNode>(shiftValue)->getSExtValue();
-			assert((shiftSVal>=-32 && shiftSVal<32) &&
-							"Shift can only be between -32 and +31");
-			ConstantSDNode *shiftSD = cast<ConstantSDNode>(N->getOperand(1));
-			uint64_t shiftVal = -shiftSD->getZExtValue();
-			SDValue negShift = DAG.getConstant(shiftVal, dl, MVT::i32);
+  EVT VT = Op.getValueType();
+  SDLoc dl(N);
+  outs() << "Opc: " << Opc << "\n";
+  switch (Opc) {
+  default: llvm_unreachable("Invalid shift opcode!");
+  case ISD::SHL:
+    return DAG.getNode(TriCoreISD::SH, dl, VT, N->getOperand(0), N->getOperand(1));
+  case ISD::SRL:
+  case ISD::SRA:
+    if(isa<ConstantSDNode>(shiftValue)) {
+      outs() <<"shift constant\n";
+      int64_t shiftSVal = cast<ConstantSDNode>(shiftValue)->getSExtValue();
+      assert((shiftSVal>=-32 && shiftSVal<32) &&
+              "Shift can only be between -32 and +31");
+      ConstantSDNode *shiftSD = cast<ConstantSDNode>(N->getOperand(1));
+      uint64_t shiftVal = -shiftSD->getZExtValue();
+      SDValue negShift = DAG.getConstant(shiftVal, dl, MVT::i32);
 
-			unsigned Opcode = (Opc== ISD::SRL) ? TriCoreISD::SH : TriCoreISD::SHA;
+      unsigned Opcode = (Opc== ISD::SRL) ? TriCoreISD::SH : TriCoreISD::SHA;
 
-			return DAG.getNode(Opcode, dl, VT, N->getOperand(0), negShift);
-		}
-		else { // shift value is stored in a register
+      return DAG.getNode(Opcode, dl, VT, N->getOperand(0), negShift);
+    }
+    else { // shift value is stored in a register
 
-			SDValue regOP = N->getOperand(1);
-			// Create subtraction node
-			SDValue zero = DAG.getConstant(0, dl, MVT::i32);
-			SDValue rsubNode = DAG.getNode(ISD::SUB, dl, MVT::i32, zero, regOP);
-			unsigned Opcode = (Opc== ISD::SRL) ? TriCoreISD::SH : TriCoreISD::SHA;
-			return DAG.getNode(Opcode, dl, MVT::i32, N->getOperand(0), rsubNode);
-		}
-	}
+      SDValue regOP = N->getOperand(1);
+      // Create subtraction node
+      SDValue zero = DAG.getConstant(0, dl, MVT::i32);
+      SDValue rsubNode = DAG.getNode(ISD::SUB, dl, MVT::i32, zero, regOP);
+      unsigned Opcode = (Opc== ISD::SRL) ? TriCoreISD::SH : TriCoreISD::SHA;
+      return DAG.getNode(Opcode, dl, MVT::i32, N->getOperand(0), rsubNode);
+    }
+  }
 }
 
 static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
@@ -241,7 +241,7 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
   case ISD::SETUGT:
     std::swap(LHS, RHS);        // FALLTHROUGH
   case ISD::SETULT:
-  	tricoreCC = DAG.getConstant(TriCoreCC::COND_NE, dl, MVT::i32);
+    tricoreCC = DAG.getConstant(TriCoreCC::COND_NE, dl, MVT::i32);
     // Turn lhs u< rhs with lhs constant into rhs u>= lhs+1, this allows us to
     // fold constant into instruction.
     if (const ConstantSDNode * C = dyn_cast<ConstantSDNode>(LHS)) {
@@ -255,7 +255,7 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
   case ISD::SETLE:
     std::swap(LHS, RHS);        // FALLTHROUGH
   case ISD::SETGE:
-  	tricoreCC = DAG.getConstant(TriCoreCC::COND_NE, dl, MVT::i32);
+    tricoreCC = DAG.getConstant(TriCoreCC::COND_NE, dl, MVT::i32);
     // Turn lhs >= rhs with lhs constant into rhs < lhs+1, this allows us to
     // fold constant into instruction.
     if (const ConstantSDNode * C = dyn_cast<ConstantSDNode>(LHS)) {
@@ -269,7 +269,7 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
   case ISD::SETGT:
     std::swap(LHS, RHS);        // FALLTHROUGH
   case ISD::SETLT:
-  	tricoreCC = DAG.getConstant(TriCoreCC::COND_NE, dl, MVT::i32);
+    tricoreCC = DAG.getConstant(TriCoreCC::COND_NE, dl, MVT::i32);
     // Turn lhs < rhs with lhs constant into rhs >= lhs+1, this allows us to
     // fold constant into instruction.
     if (const ConstantSDNode * C = dyn_cast<ConstantSDNode>(LHS)) {
@@ -284,58 +284,58 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, ISD::CondCode CC,
 
   if (VT == MVT::i64) {
 
-  	SDValue LHSlo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, LHS,
-  	                               DAG.getIntPtrConstant(0, dl));
-  	SDValue LHShi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, LHS,
-  	  	                           DAG.getIntPtrConstant(1, dl));
+    SDValue LHSlo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, LHS,
+                                   DAG.getIntPtrConstant(0, dl));
+    SDValue LHShi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, LHS,
+                                   DAG.getIntPtrConstant(1, dl));
 
-  	SDValue RHSlo, RHShi;
-  	if (RHS.getOpcode() != ISD::Constant) {
-  			RHSlo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, RHS,
-																					 DAG.getIntPtrConstant(0, dl));
-				RHShi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, RHS,
-																					 DAG.getIntPtrConstant(1, dl));
-  	}
-  	else
-  	{
-  		ConstantSDNode *C = cast<ConstantSDNode>(RHS);
-  		int64_t immVal = C->getSExtValue();
-  		int32_t lowerByte = immVal & 0xffffffff;
-  		int32_t HigherByte = (immVal >> 32);
+    SDValue RHSlo, RHShi;
+    if (RHS.getOpcode() != ISD::Constant) {
+        RHSlo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, RHS,
+                                           DAG.getIntPtrConstant(0, dl));
+        RHShi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32, RHS,
+                                           DAG.getIntPtrConstant(1, dl));
+    }
+    else
+    {
+      ConstantSDNode *C = cast<ConstantSDNode>(RHS);
+      int64_t immVal = C->getSExtValue();
+      int32_t lowerByte = immVal & 0xffffffff;
+      int32_t HigherByte = (immVal >> 32);
 
-  		RHSlo = DAG.getConstant(lowerByte, dl, MVT::i32);
-  		RHShi = DAG.getConstant(HigherByte, dl, MVT::i32);
-  		RHShi.dump();
-  	}
+      RHSlo = DAG.getConstant(lowerByte, dl, MVT::i32);
+      RHShi = DAG.getConstant(HigherByte, dl, MVT::i32);
+      RHShi.dump();
+    }
 
-  	SDValue TargetEQ;
-  	if (TCC != TriCoreCC::COND_NE)
-  		TargetEQ = DAG.getConstant(TriCoreCC::COND_EQ, dl, MVT::i32);
-  	else
-  		TargetEQ = DAG.getConstant(TCC, dl, MVT::i32);
+    SDValue TargetEQ;
+    if (TCC != TriCoreCC::COND_NE)
+      TargetEQ = DAG.getConstant(TriCoreCC::COND_EQ, dl, MVT::i32);
+    else
+      TargetEQ = DAG.getConstant(TCC, dl, MVT::i32);
 
-		SDVTList VTs = DAG.getVTList(MVT::i32, MVT::Glue);
-		SDValue Ops[] = {LHShi, RHShi, TargetEQ};
-		SDValue compareHi = DAG.getNode(TriCoreISD::CMP, dl, VTs, Ops);
+    SDVTList VTs = DAG.getVTList(MVT::i32, MVT::Glue);
+    SDValue Ops[] = {LHShi, RHShi, TargetEQ};
+    SDValue compareHi = DAG.getNode(TriCoreISD::CMP, dl, VTs, Ops);
 
-		TargetCC = DAG.getConstant(TCC, dl, MVT::i32);
-		SDValue Ops2[] = {compareHi.getValue(0), LHSlo, RHSlo, TargetCC, compareHi.getValue(1)};
-		SDValue compareLo = DAG.getNode(TriCoreISD::LOGICCMP, dl, VTs, Ops2);
+    TargetCC = DAG.getConstant(TCC, dl, MVT::i32);
+    SDValue Ops2[] = {compareHi.getValue(0), LHSlo, RHSlo, TargetCC, compareHi.getValue(1)};
+    SDValue compareLo = DAG.getNode(TriCoreISD::LOGICCMP, dl, VTs, Ops2);
 
-		if ( (TCC == TriCoreCC::COND_NE ) || (TCC == TriCoreCC::COND_EQ))
-			return compareLo;
+    if ( (TCC == TriCoreCC::COND_NE ) || (TCC == TriCoreCC::COND_EQ))
+      return compareLo;
 
-		SDValue SecondCC = DAG.getConstant(TriCoreCC::COND_LT + 10, dl, MVT::i32);
-		if(RHS.getOpcode() == ISD::Constant) {
-			std::swap(LHShi, RHShi);
-			SecondCC = DAG.getConstant(TCC + 10, dl, MVT::i32);
-		}
+    SDValue SecondCC = DAG.getConstant(TriCoreCC::COND_LT + 10, dl, MVT::i32);
+    if(RHS.getOpcode() == ISD::Constant) {
+      std::swap(LHShi, RHShi);
+      SecondCC = DAG.getConstant(TCC + 10, dl, MVT::i32);
+    }
 
-		SDValue Ops3[] = {compareLo.getValue(0), RHShi, LHShi, SecondCC, compareLo.getValue(1)};
-		SDValue compareCombine = DAG.getNode(TriCoreISD::LOGICCMP, dl, VTs, Ops3);
+    SDValue Ops3[] = {compareLo.getValue(0), RHShi, LHShi, SecondCC, compareLo.getValue(1)};
+    SDValue compareCombine = DAG.getNode(TriCoreISD::LOGICCMP, dl, VTs, Ops3);
 
-		return compareCombine;
-  	//LHS2.dump();
+    return compareCombine;
+    //LHS2.dump();
   }
 
 
@@ -405,7 +405,7 @@ SDValue TriCoreTargetLowering::LowerSELECT_CC(SDValue Op,
 SDValue TriCoreTargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG& DAG) const
 {
 
-	EVT VT = Op.getValueType();
+  EVT VT = Op.getValueType();
   GlobalAddressSDNode *GlobalAddr = cast<GlobalAddressSDNode>(Op.getNode());
   int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
   SDValue TargetAddr =
@@ -456,7 +456,7 @@ TriCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 
   BuildMI(BB, dl, TII.get(TriCore::JNZsbr))
     .addMBB(copy1MBB)
-  	.addReg(MI->getOperand(4).getReg());
+    .addReg(MI->getOperand(4).getReg());
 
   //  copy0MBB:
   //   %FalseValue = ...
@@ -527,28 +527,28 @@ SDValue TriCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SmallVector<SDValue, 8> MemOpChains;
 
   // We only support calling global addresses.
-	GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee);
-	assert(G && "We only support the calling of global addresses");
-	Callee = DAG.getTargetGlobalAddress(G->getGlobal(), Loc, MVT::i32);
+  GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee);
+  assert(G && "We only support the calling of global addresses");
+  Callee = DAG.getTargetGlobalAddress(G->getGlobal(), Loc, MVT::i32);
 
-	int32_t originalArgPos = TCCH.findInRegRecord(G->getGlobal()->getName());
-	uint32_t argNum = TCCH.getNumOfArgs(G->getGlobal()->getName());
+  int32_t originalArgPos = TCCH.findInRegRecord(G->getGlobal()->getName());
+  uint32_t argNum = TCCH.getNumOfArgs(G->getGlobal()->getName());
   TCCH.init();
   TCCH.setArgPos(originalArgPos);
   // Walk the register/memloc assignments, inserting copies/loads.
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
     if(i<argNum)
-    	VA.convertToReg(TCCH.getRegRecordRegister(TCCH.getArgPos()));
+      VA.convertToReg(TCCH.getRegRecordRegister(TCCH.getArgPos()));
     SDValue Arg = OutVals[i];
 
     // We only handle fully promoted arguments.
     assert(VA.getLocInfo() == CCValAssign::Full && "Unhandled loc info");
 
     if (VA.isRegLoc()) {
-    	RegsToPass.push_back(
-    					std::make_pair(VA.getLocReg(), Arg));
-    	TCCH.incrArgPos();
+      RegsToPass.push_back(
+              std::make_pair(VA.getLocReg(), Arg));
+      TCCH.incrArgPos();
       //RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
       continue;
     }
@@ -575,8 +575,6 @@ SDValue TriCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     InFlag = Chain.getValue(1);
   }
 
-
-
   std::vector<SDValue> Ops;
   Ops.push_back(Chain);
   Ops.push_back(Callee);
@@ -595,9 +593,9 @@ SDValue TriCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   assert(Mask && "Missing call preserved mask for calling convention");
   Ops.push_back(DAG.getRegisterMask(Mask));
 
-		if (InFlag.getNode()) {
-			Ops.push_back(InFlag);
-		}
+    if (InFlag.getNode()) {
+      Ops.push_back(InFlag);
+    }
 
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
 
@@ -651,107 +649,107 @@ SDValue TriCoreTargetLowering::LowerCallResult(
 
 //Called when function in entered
 SDValue TriCoreTargetLowering::LowerFormalArguments(SDValue Chain,
-		CallingConv::ID CallConv, bool isVarArg,
-		const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc dl, SelectionDAG &DAG,
-		SmallVectorImpl<SDValue> &InVals) const {
-	MachineFunction &MF = DAG.getMachineFunction();
-	MachineRegisterInfo &RegInfo = MF.getRegInfo();
+    CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc dl, SelectionDAG &DAG,
+    SmallVectorImpl<SDValue> &InVals) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineRegisterInfo &RegInfo = MF.getRegInfo();
 
-	assert(!isVarArg && "VarArg not supported");
+  assert(!isVarArg && "VarArg not supported");
 
-	// Assign locations to all of the incoming arguments.
-	SmallVector<CCValAssign, 16> ArgLocs;
+  // Assign locations to all of the incoming arguments.
+  SmallVector<CCValAssign, 16> ArgLocs;
 
-	//get incoming arguments information
-	CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
-			*DAG.getContext());
+  //get incoming arguments information
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
+      *DAG.getContext());
 
-	StringRef funName = DAG.getMachineFunction().getFunction()->getName();
+  StringRef funName = DAG.getMachineFunction().getFunction()->getName();
 
 //  DAG.getMachineFunction().getFunction()
-	CCInfo.AnalyzeFormalArguments(Ins, CC_TriCore);
-        
-
-	CCValAssign VA;
-	TCCH.init();
-
-	for (uint32_t i = 0; i < ArgLocs.size(); i++) {
-                
-		VA = ArgLocs[i];
-
-		SDValue ArgIn;
-		unsigned AddrReg;
-		if (TCCH.isRegValPtrType(MF)) {
-			//Is there any address register available?
-			AddrReg = TCCH.getNextAddrRegs(funName);
-			if (AddrReg != UNKNOWN_REG)
-				VA.convertToReg(AddrReg);
-		  } else {
-			unsigned DataReg = TCCH.getNextDataRegs(funName);
-			if (DataReg != UNKNOWN_REG)
-				VA.convertToReg(DataReg);
-		}
-
-		if (VA.isRegLoc()) {
-			// Arguments passed in registers
-			EVT RegVT = VA.getLocVT();
-			assert(RegVT.getSimpleVT().SimpleTy == MVT::i32
-							&& "Only support MVT::i32 register passing");
-
-			unsigned VReg;
-
-//			outs() << "TCCH curPos: " << TCCH.getCurPos() << "\n";
-			// If the argument is a pointer type then create a AddrRegsClass
-			// Virtual register.
-			if (TCCH.isRegValPtrType(MF)) {
-				//VA.setValVT(MVT(MVT::iPTR));
-				VReg = RegInfo.createVirtualRegister(&TriCore::AddrRegsRegClass);
-				RegInfo.addLiveIn(VA.getLocReg(), VReg); //mark the register is inuse
-				TCCH.saveRegRecord(funName, VA.getLocReg(), true);
-				TCCH++;
-				ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, MVT::iPTR);
-			}
-			// else place it inside a data register.
-			else {
-				VReg = RegInfo.createVirtualRegister(&TriCore::DataRegsRegClass);
-				RegInfo.addLiveIn(VA.getLocReg(), VReg); //mark the register is inuse
-				TCCH.saveRegRecord(funName, VA.getLocReg(), false);
-				ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, MVT::i32);
-				TCCH++;
-			}
+  CCInfo.AnalyzeFormalArguments(Ins, CC_TriCore);
 
 
-			InVals.push_back(ArgIn);
-			TCCH.incrArgPos();
-			continue;
-		}
+  CCValAssign VA;
+  TCCH.init();
 
-		assert(
-				VA.isMemLoc()
-						&& "Can only pass arguments as either registers or via the stack");
+  for (uint32_t i = 0; i < ArgLocs.size(); i++) {
 
-		const unsigned Offset = VA.getLocMemOffset();
+    VA = ArgLocs[i];
 
-		// create stack offset it the input argument is placed in memory
-		const int FI = MF.getFrameInfo()->CreateFixedObject(4, Offset, true);
-		EVT PtrTy = getPointerTy(DAG.getDataLayout());
-		SDValue FIPtr = DAG.getFrameIndex(FI, PtrTy);
+    SDValue ArgIn;
+    unsigned AddrReg;
+    if (TCCH.isRegValPtrType(MF)) {
+      //Is there any address register available?
+      AddrReg = TCCH.getNextAddrRegs(funName);
+      if (AddrReg != UNKNOWN_REG)
+        VA.convertToReg(AddrReg);
+      } else {
+      unsigned DataReg = TCCH.getNextDataRegs(funName);
+      if (DataReg != UNKNOWN_REG)
+        VA.convertToReg(DataReg);
+    }
 
-		assert(
-				VA.getValVT() == MVT::i32 && "Only support passing arguments as i32");
+    if (VA.isRegLoc()) {
+      // Arguments passed in registers
+      EVT RegVT = VA.getLocVT();
+      assert(RegVT.getSimpleVT().SimpleTy == MVT::i32
+              && "Only support MVT::i32 register passing");
 
-		//create a load node for the created frame object
-		SDValue Load = DAG.getLoad(VA.getValVT(), dl, Chain, FIPtr,
-				MachinePointerInfo(), false, false, false, 0);
+      unsigned VReg;
 
-		InVals.push_back(Load);
-		TCCH.incrArgPos();
-	}
+//      outs() << "TCCH curPos: " << TCCH.getCurPos() << "\n";
+      // If the argument is a pointer type then create a AddrRegsClass
+      // Virtual register.
+      if (TCCH.isRegValPtrType(MF)) {
+        //VA.setValVT(MVT(MVT::iPTR));
+        VReg = RegInfo.createVirtualRegister(&TriCore::AddrRegsRegClass);
+        RegInfo.addLiveIn(VA.getLocReg(), VReg); //mark the register is inuse
+        TCCH.saveRegRecord(funName, VA.getLocReg(), true);
+        TCCH++;
+        ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, MVT::iPTR);
+      }
+      // else place it inside a data register.
+      else {
+        VReg = RegInfo.createVirtualRegister(&TriCore::DataRegsRegClass);
+        RegInfo.addLiveIn(VA.getLocReg(), VReg); //mark the register is inuse
+        TCCH.saveRegRecord(funName, VA.getLocReg(), false);
+        ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, MVT::i32);
+        TCCH++;
+      }
 
-	TCCH.setCurPos(0);
-	//TCCH.printRegRecord();
 
-	return Chain;
+      InVals.push_back(ArgIn);
+      TCCH.incrArgPos();
+      continue;
+    }
+
+    assert(
+        VA.isMemLoc()
+            && "Can only pass arguments as either registers or via the stack");
+
+    const unsigned Offset = VA.getLocMemOffset();
+
+    // create stack offset it the input argument is placed in memory
+    const int FI = MF.getFrameInfo()->CreateFixedObject(4, Offset, true);
+    EVT PtrTy = getPointerTy(DAG.getDataLayout());
+    SDValue FIPtr = DAG.getFrameIndex(FI, PtrTy);
+
+    assert(
+        VA.getValVT() == MVT::i32 && "Only support passing arguments as i32");
+
+    //create a load node for the created frame object
+    SDValue Load = DAG.getLoad(VA.getValVT(), dl, Chain, FIPtr,
+        MachinePointerInfo(), false, false, false, 0);
+
+    InVals.push_back(Load);
+    TCCH.incrArgPos();
+  }
+
+  TCCH.setCurPos(0);
+  //TCCH.printRegRecord();
+
+  return Chain;
 }
 
 //===----------------------------------------------------------------------===//

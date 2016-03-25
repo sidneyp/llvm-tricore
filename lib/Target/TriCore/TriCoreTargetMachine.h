@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef TRICORETARGETMACHINE_H
-#define TRICORETARGETMACHINE_H
+#ifndef LLVM_LIB_TARGET_TRICORE_TRICORETARGETMACHINE_H
+#define LLVM_LIB_TARGET_TRICORE_TRICORETARGETMACHINE_H
 
 #include "TriCore.h"
 #include "TriCoreFrameLowering.h"
@@ -25,25 +25,19 @@
 
 namespace llvm {
 
-/**
-* @class TriCoreTargetMachine 
-* \brief This class describes the characteristics of TriCore Machine.
-*/
-class TriCoreTargetMachine : public LLVMTargetMachine {
-  TriCoreSubtarget Subtarget;
+class TriCoreTargetMachine : public LLVMTargetMachine {  
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
+  TriCoreSubtarget Subtarget;
 
 public:
   TriCoreTargetMachine(const Target &T, const Triple &TT, StringRef CPU,
                    StringRef FS, const TargetOptions &Options, Reloc::Model RM,
                    CodeModel::Model CM, CodeGenOpt::Level OL);
   
-  const TriCoreSubtarget * getSubtargetImpl() const {
-    return &Subtarget;
-  }
+  const TriCoreSubtarget *getSubtargetImpl() const { return &Subtarget; }
   
-  virtual const TargetSubtargetInfo *
-  getSubtargetImpl(const Function &) const override {
+  virtual const TargetSubtargetInfo *getSubtargetImpl(const Function &) 
+  const override {
     return &Subtarget;
   }
 

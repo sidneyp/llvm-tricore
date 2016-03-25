@@ -5159,7 +5159,7 @@ else
  ;;
     SystemZ)     TARGET_HAS_JIT=1
  ;;
-    TriCore)     TARGET_HAS_JIT=0
+    TriCore)     TARGET_HAS_JIT=1
  ;;
     WebAssembly) TARGET_HAS_JIT=0
  ;;
