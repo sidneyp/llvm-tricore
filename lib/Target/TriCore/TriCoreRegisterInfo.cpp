@@ -63,11 +63,11 @@ BitVector TriCoreRegisterInfo::getReservedRegs(const MachineFunction &MF) const 
   return Reserved;
 }
 
-const uint32_t *
-TriCoreRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
-                                        CallingConv::ID CC) const {
-  return CSR_RegMask;
-}
+//const uint32_t *
+//TriCoreRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
+                                        //CallingConv::ID CC) const {
+  //return CSR_RegMask;
+//}
 
 bool
 TriCoreRegisterInfo::requiresRegisterScavenging(const MachineFunction &MF) const {

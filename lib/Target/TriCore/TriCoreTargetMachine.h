@@ -25,7 +25,7 @@
 
 namespace llvm {
 
-class TriCoreTargetMachine : public LLVMTargetMachine {  
+class TriCoreTargetMachine : public LLVMTargetMachine {
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   TriCoreSubtarget Subtarget;
 
@@ -33,17 +33,16 @@ public:
   TriCoreTargetMachine(const Target &T, const Triple &TT, StringRef CPU,
                    StringRef FS, const TargetOptions &Options, Reloc::Model RM,
                    CodeModel::Model CM, CodeGenOpt::Level OL);
-  
+  ~TriCoreTargetMachine() override;
+
   const TriCoreSubtarget *getSubtargetImpl() const { return &Subtarget; }
-  
-  virtual const TargetSubtargetInfo *getSubtargetImpl(const Function &) 
-  const override {
+  const TriCoreSubtarget *getSubtargetImpl(const Function &) const override {
     return &Subtarget;
   }
 
-  /// Pass Pipeline Configuration
-  virtual TargetPassConfig *createPassConfig(legacy::PassManagerBase &PM) override;
-  
+  // Pass Pipeline Configuration
+  TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }

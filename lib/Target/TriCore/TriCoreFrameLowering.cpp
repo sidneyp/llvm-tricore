@@ -33,8 +33,8 @@ using namespace llvm;
 //===----------------------------------------------------------------------===//
 // TriCoreFrameLowering:
 //===----------------------------------------------------------------------===//
-TriCoreFrameLowering::TriCoreFrameLowering()
-    : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, 4, 0) {
+TriCoreFrameLowering::TriCoreFrameLowering(const TriCoreSubtarget &sti)
+  : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, 4, 0) {
   // Do nothing
 }
 
@@ -44,7 +44,7 @@ bool TriCoreFrameLowering::hasFP(const MachineFunction &MF) const {
 
   return (MF.getTarget().Options.DisableFramePointerElim(MF) ||
          MF.getFrameInfo()->hasVarSizedObjects() ||
-         MFI->isFrameAddressTaken()) ;
+         MFI->isFrameAddressTaken());
 }
 
 uint64_t TriCoreFrameLowering::computeStackSize(MachineFunction &MF) const {
@@ -97,15 +97,15 @@ void TriCoreFrameLowering::emitPrologue(MachineFunction &MF,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc dl = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  // const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
   uint64_t StackSize = computeStackSize(MF);
   if (!StackSize) {
     return;
   }
 
-  if (TFI->hasFP(MF)) {
+  if (hasFP(MF)) {
     MachineFunction::iterator I;
-    BuildMI(MBB, MBBI, dl, TII.get(TriCore::MOVAArr), TriCore::A14)
+    BuildMI(MBB, MBBI, dl, TII.get(TriCore::MOVAAsrr), TriCore::A14)
               .addReg(TriCore::A10);
 
     // Mark the FramePtr as live-in in every block except the entry
@@ -128,9 +128,9 @@ void TriCoreFrameLowering::emitPrologue(MachineFunction &MF,
   }
 }
 
+
 void TriCoreFrameLowering::emitEpilogue(MachineFunction &MF,
-                                    MachineBasicBlock &MBB) const {
-}
+                            MachineBasicBlock &MBB) const {}
 
 // This function eliminates ADJCALLSTACKDOWN, ADJCALLSTACKUP pseudo
 // instructions

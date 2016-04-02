@@ -25,48 +25,50 @@
 using namespace llvm;
 
 struct regInfo{
-	StringRef fName;
-	unsigned reg;
-	bool isPointer;
+  StringRef fName;
+  unsigned reg;
+  bool isPointer;
 };
 
 class TriCoreCallingConvHook {
 
 
 private:
-	uint32_t curPos = 0;
-	uint32_t curArg = 0;
+  uint32_t curPos = 0;
+  uint32_t curArg = 0;
 
 
-	std::vector< regInfo > regRecord;
+  std::vector< regInfo > regRecord;
 
 public:
-	TriCoreCallingConvHook();
-	bool isRegValPtrType (MachineFunction& _mf);
-	void init();
-	void setCurPos(uint32_t curPos = 0) {this->curPos = curPos;}
-	void setArgPos(uint32_t curArg = 0) {this->curArg = curArg;}
+  TriCoreCallingConvHook();
+  bool isRegValPtrType (MachineFunction& _mf);
+  bool isRegValid64Type (MachineFunction& _mf);
+  void init();
+  void setCurPos(uint32_t curPos = 0) {this->curPos = curPos;}
+  void setArgPos(uint32_t curArg = 0) {this->curArg = curArg;}
 
-	void incrArgPos() {this->curArg++;}
-	TriCoreCallingConvHook operator++(int);
-	uint32_t operator()() { return this->curPos;}
+  void incrArgPos() {this->curArg++;}
+  TriCoreCallingConvHook operator++(int);
+  uint32_t operator()() { return this->curPos;}
 
 
 
-	int32_t findInRegRecord(StringRef funString);
-	int32_t findInRegLastRecord(StringRef funString);
+  int32_t findInRegRecord(StringRef funString);
+  int32_t findInRegLastRecord(StringRef funString);
 
-	uint32_t getCurPos() const {	return this->curPos;}
-	uint32_t getArgPos() const {	return curArg;}
-	unsigned getNextAddrRegs(StringRef fName);
-	unsigned getNextDataRegs(StringRef fName);
-	bool getRegRecordisPointer(uint32_t pos);
-	StringRef getFunctionName(uint32_t pos);
-	unsigned getRegRecordRegister(uint32_t pos);
-	uint32_t getNumOfArgs(StringRef fName);
+  uint32_t getCurPos() const {  return this->curPos;}
+  uint32_t getArgPos() const {  return curArg;}
+  unsigned getNextAddrRegs(StringRef fName);
+  unsigned getNextDataRegs(StringRef fName);
+  unsigned getNextExtRegs(StringRef fName);
+  bool getRegRecordisPointer(uint32_t pos);
+  StringRef getFunctionName(uint32_t pos);
+  unsigned getRegRecordRegister(uint32_t pos);
+  uint32_t getNumOfArgs(StringRef fName);
 
-	void saveRegRecord(StringRef funName, unsigned reg, bool isPointer);
-	void printRegRecord();
+  void saveRegRecord(StringRef funName, unsigned reg, bool isPointer);
+  void printRegRecord();
 };
 
 extern TriCoreCallingConvHook TCCH;

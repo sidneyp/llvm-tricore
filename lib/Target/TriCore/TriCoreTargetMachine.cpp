@@ -49,12 +49,12 @@ static std::string computeDataLayout() {
 *
 */
 TriCoreTargetMachine::TriCoreTargetMachine(const Target &T, const Triple &TT,
-                                   StringRef CPU, StringRef FS,
-                                   const TargetOptions &Options,
-                                   Reloc::Model RM, CodeModel::Model CM,
-                                   CodeGenOpt::Level OL)
-    : LLVMTargetMachine(T, computeDataLayout(), TT, CPU, FS, Options,
-      RM, CM, OL),
+                                           StringRef CPU, StringRef FS,
+                                           const TargetOptions &Options,
+                                           Reloc::Model RM, CodeModel::Model CM,
+                                           CodeGenOpt::Level OL)
+    : LLVMTargetMachine(T, computeDataLayout(), 
+                        TT, CPU, FS, Options, RM, CM, OL),
       TLOF(make_unique<TargetLoweringObjectFileELF>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();

@@ -29,4 +29,4 @@ TriCoreSubtarget::TriCoreSubtarget(const Triple &TT, const std::string &CPU,
                                const std::string &FS, const TargetMachine &TM)
     : TriCoreGenSubtargetInfo(TT, CPU, FS),
       DL("e-m:e-p:32:32-i64:32-a:0:32-n32"),
-      InstrInfo(), TLInfo(TM), TSInfo(), FrameLowering() {}
+      InstrInfo(), FrameLowering(*this), TLInfo(TM, *this), TSInfo() {}
