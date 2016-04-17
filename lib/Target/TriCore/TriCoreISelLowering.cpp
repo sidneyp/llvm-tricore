@@ -472,9 +472,9 @@ SDValue TriCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   CLI.IsTailCall = false;
 
-  if (isVarArg) {
-    llvm_unreachable("Unimplemented");
-  }
+  //if (isVarArg) {
+    //llvm_unreachable("Unimplemented");
+  //}
 
 
   // Analyze operands of the call, assigning locations to each operand.
@@ -553,16 +553,16 @@ SDValue TriCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
 
   // Add a register mask operand representing the call-preserved registers.
-  const uint32_t *Mask;
-  const TargetRegisterInfo *TRI = DAG.getSubtarget().getRegisterInfo();
-  Mask = TRI->getCallPreservedMask(DAG.getMachineFunction(), CallConv);
+  //const uint32_t *Mask;
+  //const TargetRegisterInfo *TRI = DAG.getSubtarget().getRegisterInfo();
+  //Mask = TRI->getCallPreservedMask(DAG.getMachineFunction(), CallConv);
 
-  assert(Mask && "Missing call preserved mask for calling convention");
-  Ops.push_back(DAG.getRegisterMask(Mask));
+  //assert(Mask && "Missing call preserved mask for calling convention");
+  //Ops.push_back(DAG.getRegisterMask(Mask));
 
-    if (InFlag.getNode()) {
-      Ops.push_back(InFlag);
-    }
+  if (InFlag.getNode()) {
+    Ops.push_back(InFlag);
+  }
 
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
 

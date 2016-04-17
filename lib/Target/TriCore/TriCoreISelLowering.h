@@ -21,7 +21,7 @@
 
 namespace llvm {
 
-  // Forward delcarations
+  // Forward declarations
   class TriCoreSubtarget;
   class TriCoreTargetMachine;
 
@@ -122,5 +122,5 @@ namespace llvm {
   };
 }
 
-#endif // TriCoreISELLOWERING_H
+#endif
 

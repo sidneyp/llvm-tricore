@@ -1,4 +1,4 @@
-;===- ./lib/Target/TriCore/LLVMBuild.txt -----------------------*- Conf -*--===;
+;===- ./lib/Target/TriCore/Disassembler/LLVMBuild.txt ----------*- Conf -*--===;
 ;
 ;                     The LLVM Compiler Infrastructure
 ;
@@ -15,21 +15,9 @@
 ;
 ;===------------------------------------------------------------------------===;
 
-[common]
-subdirectories = InstPrinter MCTargetDesc TargetInfo
-
 [component_0]
-type = TargetGroup
-name = TriCore
-parent = Target
-has_asmprinter = 0
-has_disassembler = 1
-
-[component_1]
 type = Library
-name = TriCoreCodeGen
+name = TriCoreDisassembler
 parent = TriCore
-required_libraries = Analysis AsmPrinter CodeGen Core MC SelectionDAG
-                     Support Target TransformUtils TriCoreAsmPrinter
-                     TriCoreDesc TriCoreInfo
+required_libraries = MCDisassembler Support TriCoreInfo
 add_to_library_groups = TriCore

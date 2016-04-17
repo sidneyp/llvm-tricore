@@ -65,8 +65,8 @@ BitVector TriCoreRegisterInfo::getReservedRegs(const MachineFunction &MF) const 
 
 //const uint32_t *
 //TriCoreRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
-                                        //CallingConv::ID CC) const {
-  //return CSR_RegMask;
+                                          //CallingConv::ID CC) const {
+  //return CSR_TriCore_RegMask;
 //}
 
 bool

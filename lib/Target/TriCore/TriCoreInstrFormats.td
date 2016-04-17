@@ -21,7 +21,7 @@
 //  d       - destination register
 //  n       - multiplication shift value (0b00 or 0b01)
 //  const9  - 9 bits immediate value
-//  disp24  - 24 bits displacment value
+//  disp24  - 24 bits displacement value
 //
 //===----------------------------------------------------------------------===//
 
@@ -35,7 +35,7 @@ class InstTriCore<dag outs, dag ins, string asmstr, list<dag> pattern>
   //dag OutOperandList = outs;
   //dag InOperandList = ins;
   let AsmString   = asmstr;
-  let Pattern = pattern;
+  let Pattern = pattern;  
 }
 
 //===----------------------------------------------------------------------===//
@@ -45,6 +45,7 @@ class T32<dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstTriCore<outs, ins, asmstr, pattern> {
   field bits<32> Inst;
   let Size = 4;
+  field bits<32> SoftFail = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -55,6 +56,7 @@ class T16<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   field bits<16> Inst;
   let Inst{7-0} = op1;
   let Size = 2;
+  field bits<16> SoftFail = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -125,7 +127,7 @@ class SBR<bits<8> op1, dag outs, dag ins,
 // 16-bit SR Instruction Format: <op2|s1|d|op1>
 //===----------------------------------------------------------------------===//
 class SR<bits<8> op1, bits<4> op2, dag outs, dag ins, string asmstr, 
-			list<dag> pattern> : T16<op1, outs, ins, asmstr, pattern> {
+      list<dag> pattern> : T16<op1, outs, ins, asmstr, pattern> {
 
   bits<4> op2;
   bits<4> s1;
@@ -221,16 +223,16 @@ class B<bits<8> op1, dag outs, dag ins, string asmstr,
 //===----------------------------------------------------------------------===//
 class BRR<bit op2, bits<8> op1, dag outs, dag ins, string asmstr, 
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
-	
-	bits<4> s1;
-	bits<4> s2;
-	bits<15> dip15;
-	
-	let Inst{7-0} = op1;
-	let Inst{11-8} = s1;
-	let Inst{15-12} = s1;
-	let Inst{30-16} = dip15;
-	let Inst{31} = op2;
+  
+  bits<4> s1;
+  bits<4> s2;
+  bits<15> dip15;
+  
+  let Inst{7-0} = op1;
+  let Inst{11-8} = s1;
+  let Inst{15-12} = s1;
+  let Inst{30-16} = dip15;
+  let Inst{31} = op2;
 }
 
 //===----------------------------------------------------------------------===//
@@ -238,16 +240,16 @@ class BRR<bit op2, bits<8> op1, dag outs, dag ins, string asmstr,
 //===----------------------------------------------------------------------===//
 class BRC<bit op2, bits<8> op1, dag outs, dag ins, string asmstr, 
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
-	
-	bits<4> s1;
-	bits<4> const4;
-	bits<15> dip15;
-	
-	let Inst{7-0} = op1;
-	let Inst{11-8} = s1;
-	let Inst{15-12} = const4;
-	let Inst{30-16} = dip15;
-	let Inst{31} = op2;
+  
+  bits<4> s1;
+  bits<4> const4;
+  bits<15> dip15;
+  
+  let Inst{7-0} = op1;
+  let Inst{11-8} = s1;
+  let Inst{15-12} = const4;
+  let Inst{30-16} = dip15;
+  let Inst{31} = op2;
 }
 
 //===----------------------------------------------------------------------===//
@@ -255,20 +257,20 @@ class BRC<bit op2, bits<8> op1, dag outs, dag ins, string asmstr,
 //===----------------------------------------------------------------------===//
 class RCPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr, 
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
-	
-	bits<4> s1;
-	bits<4> const4;
-	bits<4> d;
-	bits<5> width;
-	bits<5> pos;
-	
-	let Inst{7-0} = op1;
-	let Inst{11-8} = s1;
-	let Inst{15-12} = const4;
-	let Inst{20-16} = width;
-	let Inst{22-21} = op2;
-	let Inst{27-23} = pos;
-	let Inst{31-28} = d;
+  
+  bits<4> s1;
+  bits<4> const4;
+  bits<4> d;
+  bits<5> width;
+  bits<5> pos;
+  
+  let Inst{7-0} = op1;
+  let Inst{11-8} = s1;
+  let Inst{15-12} = const4;
+  let Inst{20-16} = width;
+  let Inst{22-21} = op2;
+  let Inst{27-23} = pos;
+  let Inst{31-28} = d;
 }
 
 //===----------------------------------------------------------------------===//
@@ -276,20 +278,20 @@ class RCPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr,
 //===----------------------------------------------------------------------===//
 class RRPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr, 
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
-	
-	bits<4> s1;
-	bits<4> s2;
-	bits<4> d;
-	bits<5> width;
-	bits<5> pos;
-	
-	let Inst{7-0} = op1;
-	let Inst{11-8} = s1;
-	let Inst{15-12} = s2;
-	let Inst{20-16} = width;
-	let Inst{22-21} = op2;
-	let Inst{27-23} = pos;
-	let Inst{31-28} = d;
+  
+  bits<4> s1;
+  bits<4> s2;
+  bits<4> d;
+  bits<5> width;
+  bits<5> pos;
+  
+  let Inst{7-0} = op1;
+  let Inst{11-8} = s1;
+  let Inst{15-12} = s2;
+  let Inst{20-16} = width;
+  let Inst{22-21} = op2;
+  let Inst{27-23} = pos;
+  let Inst{31-28} = d;
 }
 //===----------------------------------------------------------------------===//
 // 32-bit BOL Instr Format: <off16[9:6]|off16[15:10]|off16[5:0]|s2|s1/d|op1>
