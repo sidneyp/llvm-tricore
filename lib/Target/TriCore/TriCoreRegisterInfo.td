@@ -23,7 +23,7 @@ class TriCoreDataReg<bits<16> num, string n> : TriCoreReg<n> {
 }
 
 // General Purpose Address Registers
-class TriCoreAdrReg<bits<16> num, string n> : TriCoreReg<n> {
+class TriCoreAddrReg<bits<16> num, string n> : TriCoreReg<n> {
   let Num = num;
 }
 
@@ -63,37 +63,38 @@ def D14 : TriCoreDataReg<14, "D14">, DwarfRegNum<[14]>;
 def D15 : TriCoreDataReg<15, "D15">, DwarfRegNum<[15]>;
 
 
-def A0 : TriCoreAdrReg<0, "A0">, DwarfRegNum<[16]>;
-def A1 : TriCoreAdrReg<1, "A1">, DwarfRegNum<[17]>;
-def A2 : TriCoreAdrReg<2, "A2">, DwarfRegNum<[18]>;
-def A3 : TriCoreAdrReg<3, "A3">, DwarfRegNum<[19]>;
-def A4 : TriCoreAdrReg<4, "A4">, DwarfRegNum<[20]>;
-def A5 : TriCoreAdrReg<5, "A5">, DwarfRegNum<[21]>;
-def A6 : TriCoreAdrReg<6, "A6">, DwarfRegNum<[22]>;
-def A7 : TriCoreAdrReg<7, "A7">, DwarfRegNum<[23]>;
-def A8 : TriCoreAdrReg<8, "A8">, DwarfRegNum<[24]>;
-def A9 : TriCoreAdrReg<9, "A9">, DwarfRegNum<[25]>;
-def A10 : TriCoreAdrReg<10, "A10">, DwarfRegNum<[26]>;
-def A11 : TriCoreAdrReg<11, "A11">, DwarfRegNum<[27]>;
-def A12 : TriCoreAdrReg<12, "A12">, DwarfRegNum<[28]>;
-def A13 : TriCoreAdrReg<13, "A13">, DwarfRegNum<[29]>;
-def A14 : TriCoreAdrReg<14, "A14">, DwarfRegNum<[30]>;
-def A15 : TriCoreAdrReg<15, "A15">, DwarfRegNum<[31]>;
+def A0 : TriCoreAddrReg<0, "A0">, DwarfRegNum<[16]>;
+def A1 : TriCoreAddrReg<1, "A1">, DwarfRegNum<[17]>;
+def A2 : TriCoreAddrReg<2, "A2">, DwarfRegNum<[18]>;
+def A3 : TriCoreAddrReg<3, "A3">, DwarfRegNum<[19]>;
+def A4 : TriCoreAddrReg<4, "A4">, DwarfRegNum<[20]>;
+def A5 : TriCoreAddrReg<5, "A5">, DwarfRegNum<[21]>;
+def A6 : TriCoreAddrReg<6, "A6">, DwarfRegNum<[22]>;
+def A7 : TriCoreAddrReg<7, "A7">, DwarfRegNum<[23]>;
+def A8 : TriCoreAddrReg<8, "A8">, DwarfRegNum<[24]>;
+def A9 : TriCoreAddrReg<9, "A9">, DwarfRegNum<[25]>;
+def A10 : TriCoreAddrReg<10, "A10">, DwarfRegNum<[26]>;
+def A11 : TriCoreAddrReg<11, "A11">, DwarfRegNum<[27]>;
+def A12 : TriCoreAddrReg<12, "A12">, DwarfRegNum<[28]>;
+def A13 : TriCoreAddrReg<13, "A13">, DwarfRegNum<[29]>;
+def A14 : TriCoreAddrReg<14, "A14">, DwarfRegNum<[30]>;
+def A15 : TriCoreAddrReg<15, "A15">, DwarfRegNum<[31]>;
 
-
-def subreg_even: SubRegIndex<32> {let Namespace = "TriCore";}
-def subreg_odd : SubRegIndex<32> {let Namespace = "TriCore";}
+let Namespace = "TriCore" in {
+def subreg_even : SubRegIndex<32>;
+def subreg_odd  : SubRegIndex<32, 32>;
+}
 
 //Extended 64-bit registers
 let SubRegIndices = [subreg_even, subreg_odd] in {
-  def E0 : TriCoreRegWithSubregs<0,   "E0",  [D0,D1] >, DwarfRegNum<[32]>;
-  def E2 : TriCoreRegWithSubregs<2,   "E2",  [D2,D3] >, DwarfRegNum<[33]>;
-  def E4 : TriCoreRegWithSubregs<4,   "E4",  [D4,D5] >, DwarfRegNum<[34]>;
-  def E6 : TriCoreRegWithSubregs<6,   "E6",  [D6,D7] >, DwarfRegNum<[35]>;
-  def E8 : TriCoreRegWithSubregs<8,   "E8",  [D8,D9] >, DwarfRegNum<[36]>;
-  def E10 : TriCoreRegWithSubregs<10, "E10", [D10,D11] >, DwarfRegNum<[37]>;
-  def E12 : TriCoreRegWithSubregs<12, "E12", [D12,D13] >, DwarfRegNum<[38]>;
-  def E14 : TriCoreRegWithSubregs<14, "E14", [D14,D15] >, DwarfRegNum<[39]>;
+def E0 : TriCoreRegWithSubregs<0,   "E0",  [D0,D1] >, DwarfRegNum<[32]>;
+def E2 : TriCoreRegWithSubregs<2,   "E2",  [D2,D3] >, DwarfRegNum<[33]>;
+def E4 : TriCoreRegWithSubregs<4,   "E4",  [D4,D5] >, DwarfRegNum<[34]>;
+def E6 : TriCoreRegWithSubregs<6,   "E6",  [D6,D7] >, DwarfRegNum<[35]>;
+def E8 : TriCoreRegWithSubregs<8,   "E8",  [D8,D9] >, DwarfRegNum<[36]>;
+def E10 : TriCoreRegWithSubregs<10, "E10", [D10,D11] >, DwarfRegNum<[37]>;
+def E12 : TriCoreRegWithSubregs<12, "E12", [D12,D13] >, DwarfRegNum<[38]>;
+def E14 : TriCoreRegWithSubregs<14, "E14", [D14,D15] >, DwarfRegNum<[39]>;
 }
 
 //Program Status Information Registers
