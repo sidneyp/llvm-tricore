@@ -46,13 +46,14 @@ namespace llvm {
       // depends on the signed-ness on the shift value. A negytive value is
       // a right shift, and vice versa.
       SH,
-      // Arthimatic Shift
+      // Arithmetic Shift
       SHA,
       // Loads ternary operators
       SELECT_CC,
       LOGICCMP,
       IMASK,
-      EXTR
+      EXTR,
+      ABS
     };
   }
 

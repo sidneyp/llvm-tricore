@@ -57,6 +57,7 @@ const char *TriCoreTargetLowering::getTargetNodeName(unsigned Opcode) const {
     case TriCoreISD::SH:            return "TriCoreISD::SH";
     case TriCoreISD::SHA:           return "TriCoreISD::SHA";
     case TriCoreISD::EXTR:          return "TriCoreISD::EXTR";      
+    case TriCoreISD::ABS:           return "TriCoreISD::ABS";
   }
   return nullptr;
 }

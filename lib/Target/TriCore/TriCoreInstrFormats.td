@@ -30,15 +30,15 @@ class InstTriCore<dag outs, dag ins, string asmstr, list<dag> pattern>
 
   let Namespace = "TriCore";
   /// outs and ins are inherited from the instruction class.
-  let OutOperandList = outs;
-  let InOperandList  = ins;
+  dag OutOperandList = outs;
+  dag InOperandList  = ins;
   let AsmString   = asmstr;
   let Pattern = pattern;
 }
 
 // TriCore pseudo instructions format
-class PseudoInstTriCore<dag outs, dag ins, string asmstr, list<dag> pattern>
-   : InstTriCore<0, outs, ins, asmstr, pattern> {
+class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
+   : InstTriCore<outs, ins, asmstr, pattern> {
   let isPseudo = 1;
 }
 
@@ -359,13 +359,13 @@ class BO<bits<8> op1, bits<6> op2, dag outs, dag ins, string asmstr,
 class BOL<bits<8> op1, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<10> off16;
+  bits<16> off16;
   bits<4> s2;
   bits<4> s1_d;
 
   let Inst{31-28} = off16{9-6};
-  let Inst{27-22} = off16{15:10};
-  let Inst{21-16} = off10{5-0};
+  let Inst{27-22} = off16{15-10};
+  let Inst{21-16} = off16{5-0};
   let Inst{15-12} = s2;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
@@ -377,7 +377,7 @@ class BOL<bits<8> op1, dag outs, dag ins, string asmstr,
 class BRC<bits<8> op1, bits<1> op2, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<10> disp15;
+  bits<15> disp15;
   bits<4> const4;
   bits<4> s1;
 
@@ -394,7 +394,7 @@ class BRC<bits<8> op1, bits<1> op2, dag outs, dag ins, string asmstr,
 class BRN<bits<7> op1, bits<1> op2, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<10> disp15;
+  bits<15> disp15;
   bits<5> n;
   bits<4> s1;
 
@@ -412,7 +412,7 @@ class BRN<bits<7> op1, bits<1> op2, dag outs, dag ins, string asmstr,
 class BRR<bits<8> op1, bits<1> op2, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<10> disp15;
+  bits<15> disp15;
   bits<4> s2;
   bits<4> s1;
 
@@ -494,6 +494,7 @@ class RCRR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
   let Inst{23-21} = op2;
+  let Inst{20-16} = 0;
   let Inst{15-12} = const4;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
@@ -549,6 +550,7 @@ class RR<bits<8> op1, bits<8> op2, dag outs, dag ins, string asmstr,
 
   let Inst{31-28} = d;
   let Inst{27-20} = op2;
+  let Inst{19-18} = 0;
   let Inst{17-16} = n;
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
@@ -628,6 +630,7 @@ class RRR<bits<8> op1, bits<4> op2 , dag outs, dag ins, string asmstr,
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
   let Inst{23-20} = op2;
+  let Inst{19-18} = 0;
   let Inst{17-16} = n;
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
@@ -688,6 +691,7 @@ class RRRR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
   let Inst{23-21} = op2;
+  let Inst{20-16} = 0;
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
@@ -722,7 +726,9 @@ class SYS<bits<8> op1, bits<6> op2 , dag outs, dag ins, string asmstr,
 
   bits<4> s1_d;
 
+  let Inst{31-28} = 0;
   let Inst{27-22} = op2;
+  let Inst{21-12} = 0;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
 }
