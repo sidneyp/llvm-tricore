@@ -300,7 +300,7 @@ let Defs = [PSW], Uses = [PSW] in {
    [(set DataRegs:$d, (subc DataRegs:$s1, DataRegs:$s2)),
     (implicit PSW)]>;
 
- def SUBXrr : RR<0x0B, 0x04, (outs DataRegs:$d),
+ def SUBXrr : RR<0x0B, 0x0C, (outs DataRegs:$d),
    (ins DataRegs:$s1, DataRegs:$s2),
    "subx $d, $s1, $s2",
    [(set DataRegs:$d, (sube DataRegs:$s1, DataRegs:$s2)),
@@ -950,10 +950,10 @@ def : Pat<(srl ExtRegs:$src, (i32 imm32_64:$amt)),
 
 def : Pat<(sra ExtRegs:$src, (i32 imm32_64:$amt)),
           (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
-           (SHArc ( EXTRACT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)) ,
+           (SHArc ( EXTRACT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
              (SHArc (EXTRACT_SUBREG ExtRegs:$src, subreg_odd),
-               (SHIFTAMT_NEG (imm32_64:$amt))), subreg_even), subreg_even)
-           , (i32 -31)), subreg_odd)>;
+               (SHIFTAMT_NEG (imm32_64:$amt))), subreg_even), subreg_even),
+                  (i32 -31)), subreg_odd)>;
 
 def : Pat<(sra ExtRegs:$src, (i32 imm0_31:$amt)),
           (INSERT_SUBREG( i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
@@ -987,10 +987,10 @@ def : Pat<(sext_inreg DataRegs:$src, i8),
 // sext_inreg from i8 to i64
 def : Pat<(sext_inreg ExtRegs:$src, i8),
   (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
-    (SHArc ( EXTRACT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)) ,
+    (SHArc ( EXTRACT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
       ( EXTRrrpw (EXTRACT_SUBREG ExtRegs:$src, subreg_even),
-        (i32 0), (i32 8) ), subreg_even), subreg_even)
-      , (i32 -31)), subreg_odd)>;
+        (i32 0), (i32 8) ), subreg_even), subreg_even),
+         (i32 -31)), subreg_odd)>;
 
 // sext_inreg from i16 to i64
 def : Pat<(sext_inreg ExtRegs:$src, i16),

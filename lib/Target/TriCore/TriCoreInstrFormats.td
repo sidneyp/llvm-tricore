@@ -71,6 +71,7 @@ class SB<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   bits<8> disp8;
   let Inst{15-8} = disp8;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSBInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -85,6 +86,7 @@ class SBC<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = const4;
   let Inst{11-8} = disp4;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSBCInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -99,6 +101,7 @@ class SBR<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = s2;
   let Inst{11-8} = disp4;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSBRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -113,6 +116,7 @@ class SBRN<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = n;
   let Inst{11-8} = disp4;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSBRNInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -125,6 +129,7 @@ class SC<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
 
   let Inst{15-8} = const8;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSCInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -139,6 +144,7 @@ class SLR<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = s2;
   let Inst{11-8} = d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSLRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -153,6 +159,7 @@ class SLRO<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = off4;
   let Inst{11-8} = d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSLROInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -167,6 +174,7 @@ class SR<bits<8> op1, bits<4> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = op2;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -181,6 +189,7 @@ class SRC<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = const4;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSRCInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -195,6 +204,7 @@ class SRO<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = s2;
   let Inst{11-8} = off4;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSROInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -209,6 +219,7 @@ class SRR<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = s2;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSRRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -229,6 +240,7 @@ class SRRS<bits<6> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{11-8} = s1_d;
   let Inst{7-6} = n;
   let Inst{5-0} = op1;
+  let DecoderMethod = "DecodeSRRSInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -243,6 +255,7 @@ class SSR<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSSRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -257,6 +270,7 @@ class SSRO<bits<8> op1, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-12} = off4;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSSROInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -276,6 +290,7 @@ class ABS<bits<8> op1, bits<2> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = off18{17-14};
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeABSInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -297,6 +312,7 @@ class ABSB<bits<8> op1, bits<2> op2, dag outs, dag ins, string asmstr,
   let Inst{11} = b;
   let Inst{10-8} = bpos3;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeABSBInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -311,6 +327,7 @@ class B<bits<8> op1, dag outs, dag ins, string asmstr,
   let Inst{31-16} = disp24{15-0};
   let Inst{15-8} = disp24{23-16};
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeBInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -332,6 +349,7 @@ class BIT<bits<8> op1, bits<2> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeBITInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -350,6 +368,7 @@ class BO<bits<8> op1, bits<6> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeBOInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -369,6 +388,7 @@ class BOL<bits<8> op1, dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeBOLInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -386,6 +406,7 @@ class BRC<bits<8> op1, bits<1> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = const4;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeBRCInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -404,6 +425,7 @@ class BRN<bits<7> op1, bits<1> op2, dag outs, dag ins, string asmstr,
   let Inst{11-8} = s1;
   let Inst{7} = n{4};
   let Inst{6-0} = op1;
+  let DecoderMethod = "DecodeBRNInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -421,6 +443,7 @@ class BRR<bits<8> op1, bits<1> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeBRRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -430,14 +453,15 @@ class RC<bits<8> op1, bits<7> op2, dag outs, dag ins, string asmstr,
                   list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
   bits<4> d;
-  bits<4> s1;
   bits<9> const9;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-21} = op2;
   let Inst{20-12} = const9;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRCInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -446,11 +470,11 @@ class RC<bits<8> op1, bits<7> op2, dag outs, dag ins, string asmstr,
 class RCPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr,
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> const4;
   bits<4> d;
-  bits<5> width;
   bits<5> pos;
+  bits<5> width;
+  bits<4> const4;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-23} = pos;
@@ -459,6 +483,7 @@ class RCPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = const4;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRCPWInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -478,6 +503,7 @@ class RCR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{20-12} = const9;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRCRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -498,6 +524,7 @@ class RCRR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = const4;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRCRRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -519,6 +546,7 @@ class RCRW<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = const4;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRCRWInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -527,14 +555,15 @@ class RCRW<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
 class RLC<bits<8> op1, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<16> const16;
   bits<4> d;
+  bits<16> const16;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-12} = const16;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRCLInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -543,10 +572,10 @@ class RLC<bits<8> op1, dag outs, dag ins, string asmstr,
 class RR<bits<8> op1, bits<8> op2, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
   bits<4> d;
   bits<2> n;
+  bits<4> s2;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-20} = op2;
@@ -555,6 +584,7 @@ class RR<bits<8> op1, bits<8> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -563,10 +593,11 @@ class RR<bits<8> op1, bits<8> op2, dag outs, dag ins, string asmstr,
 class RR1<bits<8> op1, bits<10> op2, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
   bits<4> d;
   bits<2> n;
+  bits<4> s2;
+  bits<4> s1;
+
 
   let Inst{31-28} = d;
   let Inst{27-18} = op2;
@@ -574,6 +605,7 @@ class RR1<bits<8> op1, bits<10> op2, dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRR1Instruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -582,16 +614,16 @@ class RR1<bits<8> op1, bits<10> op2, dag outs, dag ins, string asmstr,
 class RR2<bits<8> op1, bits<12> op2, dag outs, dag ins, string asmstr,
                  list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
   bits<4> d;
-  bits<2> n;
+  bits<4> s2;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-16} = op2;
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRR2Instruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -600,11 +632,11 @@ class RR2<bits<8> op1, bits<12> op2, dag outs, dag ins, string asmstr,
 class RRPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr,
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
   bits<4> d;
-  bits<5> width;
   bits<5> pos;
+  bits<5> width;
+  bits<4> s2;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-23} = pos;
@@ -613,6 +645,7 @@ class RRPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRPWInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -621,11 +654,11 @@ class RRPW<bits<8> op1, bits<2> op2 , dag outs, dag ins, string asmstr,
 class RRR<bits<8> op1, bits<4> op2 , dag outs, dag ins, string asmstr,
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
-  bits<4> s3;
   bits<4> d;
+  bits<4> s3;
   bits<2> n;
+  bits<4> s2;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
@@ -635,6 +668,7 @@ class RRR<bits<8> op1, bits<4> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -643,11 +677,11 @@ class RRR<bits<8> op1, bits<4> op2 , dag outs, dag ins, string asmstr,
 class RRR1<bits<8> op1, bits<6> op2 , dag outs, dag ins, string asmstr,
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
-  bits<4> s3;
   bits<4> d;
+  bits<4> s3;
   bits<2> n;
+  bits<4> s2;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
@@ -656,6 +690,7 @@ class RRR1<bits<8> op1, bits<6> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRR1Instruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -675,6 +710,7 @@ class RRR2<bits<8> op1, bits<8> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRR2Instruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -683,10 +719,10 @@ class RRR2<bits<8> op1, bits<8> op2 , dag outs, dag ins, string asmstr,
 class RRRR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
-  bits<4> s3;
   bits<4> d;
+  bits<4> s3;
+  bits<4> s2;
+  bits<4> s1;
 
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
@@ -695,6 +731,7 @@ class RRRR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRRRInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -703,11 +740,11 @@ class RRRR<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
 class RRRW<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
                 list<dag> pattern> : T32<outs, ins, asmstr, pattern> {
 
-  bits<4> s1;
-  bits<4> s2;
-  bits<4> s3;
   bits<4> d;
+  bits<4> s3;
   bits<5> width;
+  bits<4> s2;
+  bits<4> s1;  
 
   let Inst{31-28} = d;
   let Inst{27-24} = s3;
@@ -716,6 +753,7 @@ class RRRW<bits<8> op1, bits<3> op2 , dag outs, dag ins, string asmstr,
   let Inst{15-12} = s2;
   let Inst{11-8} = s1;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeRRRWInstruction";
 }
 
 //===----------------------------------------------------------------------===//
@@ -731,4 +769,5 @@ class SYS<bits<8> op1, bits<6> op2 , dag outs, dag ins, string asmstr,
   let Inst{21-12} = 0;
   let Inst{11-8} = s1_d;
   let Inst{7-0} = op1;
+  let DecoderMethod = "DecodeSYSInstruction";
 }
